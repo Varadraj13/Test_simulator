@@ -661,22 +661,11 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
 <!-- Collision warning -->
 <div class="collision-warning" id="collisionWarning">&#9888; COLLISION WARNING - Vessels in close proximity!</div>
 
-<!-- Diagnostic overlay -->
-<div id="diagOverlay" style="position:fixed; left:12px; bottom:12px; z-index:99999; background:rgba(0,0,0,0.9); color:#0f0; font-family:monospace; font-size:12px; padding:10px 14px; border-radius:8px; border:1px solid #0f0; pointer-events:none; white-space:pre; line-height:1.5;"></div>
-
 <!-- Hand tracking elements -->
 <video id="handVideo" autoplay playsinline style="display:none;"></video>
 <canvas id="handDebug" width="640" height="480" style="position:fixed; right:12px; bottom:12px; width:320px; height:240px; z-index:9999; border:1px solid rgba(255,255,255,0.2); border-radius:10px; display:none;"></canvas>
 
 <script>
-// Global error catcher — writes to diagnostic overlay
-window.onerror = function(msg, url, line, col, err) {
-  const diag = document.getElementById('diagOverlay');
-  if (diag) diag.textContent = `[JS ERROR] Line ${line}: ${msg}`;
-  console.error('[Global Error]', msg, 'at line', line, col, err);
-  return false; // don't suppress
-};
-
 // ================================================================
 //  PHASE 1: ENHANCED DATA MODELS
 // ================================================================
@@ -833,7 +822,7 @@ const ROUTES = generateRoutes();
 // ================================================================
 //  MATH HELPERS
 // ================================================================
-function lerp(a,b,t){ return a+(b-a)*t; }
+function _lerpVal(a,b,t){ return a+(b-a)*t; }
 function randInt(a,b){ return Math.floor(a+Math.random()*(b-a)); }
 function randEl(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
 function fmtNum(n){ if(n>=1e9) return (n/1e9).toFixed(1)+'B'; if(n>=1e6) return (n/1e6).toFixed(1)+'M'; if(n>=1e3) return (n/1e3).toFixed(1)+'K'; return n.toFixed(0); }
@@ -843,13 +832,16 @@ function routeLength(route) { let d=0; for(let i=1;i<route.length;i++) d+=dist(r
 function dist(a,b) { const dx=(b[1]-a[1])*Math.cos(((a[0]+b[0])/2)*Math.PI/180), dy=b[0]-a[0]; return Math.sqrt(dx*dx+dy*dy)*60; }
 
 function positionOnRoute(route, progress) {
+  if (!route || route.length < 2) return { lat: route?.[0]?.[0] || 2.5, lng: route?.[0]?.[1] || 101.5, bearing: 0, segIndex: 0 };
   const totalLen = routeLength(route);
-  let target = Math.max(0, Math.min(1, progress)) * totalLen, acc = 0;
+  if (!totalLen || isNaN(totalLen) || totalLen <= 0) return { lat: route[0][0], lng: route[0][1], bearing: calcBearing(route[0], route[1]), segIndex: 0 };
+  const clampedProgress = Math.max(0, Math.min(1, isNaN(progress) ? 0 : progress));
+  let target = clampedProgress * totalLen, acc = 0;
   for (let i=1; i<route.length; i++) {
     const segLen = dist(route[i-1], route[i]);
     if (acc+segLen >= target) {
-      const t = (target-acc)/segLen;
-      return { lat: lerp(route[i-1][0],route[i][0],t), lng: lerp(route[i-1][1],route[i][1],t), bearing: calcBearing(route[i-1],route[i]), segIndex: i };
+      const t = segLen > 0 ? (target-acc)/segLen : 0;
+      return { lat: _lerpVal(route[i-1][0],route[i][0],t), lng: _lerpVal(route[i-1][1],route[i][1],t), bearing: calcBearing(route[i-1],route[i]), segIndex: i };
     }
     acc += segLen;
   }
@@ -879,8 +871,8 @@ function createVessel(opts = {}) {
   const type = opts.type || randEl(types);
   const cfg = SHIP_TYPES[type];
   const route = opts.route || randEl(ROUTES);
-  const speed = lerp(cfg.speed[0], cfg.speed[1], Math.random());
-  const sizeMeter = Math.floor(lerp(cfg.size[0], cfg.size[1], Math.random()));
+  const speed = _lerpVal(cfg.speed[0], cfg.speed[1], Math.random());
+  const sizeMeter = Math.floor(_lerpVal(cfg.size[0], cfg.size[1], Math.random()));
   const progress = opts.progress != null ? opts.progress : Math.random() * 0.85;
   const name = randEl(SHIP_NAMES_PREFIX) + ' ' + randEl(SHIP_NAMES_SUFFIX);
   const origin = opts.origin || randEl(ORIGINS);
@@ -890,8 +882,8 @@ function createVessel(opts = {}) {
   const owner = randEl(OWNERS);
   const fuelType = type === 'lng' ? 'LNG' : randEl(FUEL_TYPES);
   const dwt = randInt(cfg.dwtRange[0], cfg.dwtRange[1]);
-  const beam = lerp(cfg.beamRange[0], cfg.beamRange[1], Math.random()).toFixed(1);
-  const draft = lerp(cfg.draftRange[0], cfg.draftRange[1], Math.random()).toFixed(1);
+  const beam = _lerpVal(cfg.beamRange[0], cfg.beamRange[1], Math.random()).toFixed(1);
+  const draft = _lerpVal(cfg.draftRange[0], cfg.draftRange[1], Math.random()).toFixed(1);
   const callSign = generateCallSign();
   const mmsi = ''+randInt(200000000, 799999999);
 
@@ -1027,7 +1019,10 @@ function updateSim(dtReal) {
   for (let i = vessels.length - 1; i >= 0; i--) {
     const v = vessels[i];
     const rLen = v.totalDist;
+    if (!rLen || isNaN(rLen) || rLen <= 0) { v.totalDist = routeLength(v.route) || 100; continue; }
+    if (isNaN(v.speed) || v.speed <= 0) { v.speed = 12; }
     const progressDelta = (v.speed * dtHours) / rLen;
+    if (isNaN(progressDelta)) continue;
     const oldProgress = v.progress;
     v.progress += progressDelta;
 
@@ -1080,6 +1075,7 @@ function updateSim(dtReal) {
     }
 
     const pos = positionOnRoute(v.route, v.progress);
+    if (isNaN(pos.lat) || isNaN(pos.lng)) { v.progress = 0; continue; }
     v.marker.setLatLng([pos.lat, pos.lng]);
     heatPoints.push([pos.lat, pos.lng, 0.6]);
 
@@ -2219,39 +2215,13 @@ updateFilterDropdowns();
 
 // Main loop — requestAnimationFrame FIRST so errors can't kill the loop
 let lastTime = performance.now();
-let diagFrameCount = 0;
-let diagLastError = 'none';
-let diagSimCalls = 0;
-
 function animate(now) {
   requestAnimationFrame(animate);
-  diagFrameCount++;
   const dt = (now - lastTime) / 1000;
   lastTime = now;
   if (playing) {
-    try {
-      updateSim(dt);
-      diagSimCalls++;
-    } catch(e) {
-      diagLastError = e.message || String(e);
-      console.error('[Sim] updateSim error:', e);
-    }
-  }
-
-  // Update diagnostic overlay every 30 frames
-  if (diagFrameCount % 30 === 0) {
-    const diag = document.getElementById('diagOverlay');
-    if (diag) {
-      const v0 = vessels.length > 0 ? vessels[0] : null;
-      const v0info = v0
-        ? `pos: ${v0.marker.getLatLng().lat.toFixed(3)},${v0.marker.getLatLng().lng.toFixed(3)} prog: ${v0.progress.toFixed(4)} spd: ${v0.speed.toFixed(1)}`
-        : 'no vessels';
-      diag.textContent =
-        `[DIAG] frames: ${diagFrameCount} | simCalls: ${diagSimCalls}\n` +
-        `playing: ${playing} | vessels: ${vessels.length} | simSpeed: ${simSpeed}\n` +
-        `ship[0]: ${v0info}\n` +
-        `lastErr: ${diagLastError}`;
-    }
+    try { updateSim(dt); }
+    catch(e) { console.error('[Sim] updateSim error:', e); }
   }
 }
 requestAnimationFrame(animate);

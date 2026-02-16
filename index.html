@@ -40,6 +40,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; height:
 .btn:hover { background: rgba(56, 189, 248, 0.28); }
 .btn.active { background: rgba(56, 189, 248, 0.4); border-color: #38bdf8; }
 #btnHand.active { background: #4ade80; color: #0a0e27; border-color: #4ade80; }
+#btnEasyHands.active { background: linear-gradient(135deg, #22d3ee, #06b6d4); color: #0a0e27; border-color: #22d3ee; }
 .btn.danger { color: #f87171; border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.08); }
 .btn.danger:hover { background: rgba(248,113,113,0.22); }
 .btn.success { color: #4ade80; border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.08); }
@@ -321,6 +322,7 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
       <button class="btn" id="btnDB" onclick="toggleDBPanel()">&#9107; DB</button>
       <button class="btn" id="btnDrag" onclick="toggleDragMode()">&#9995; Drag</button>
       <button class="btn" id="btnHand" onclick="toggleHandMode()">&#9995; Hand Mode</button>
+      <button class="btn" id="btnEasyHands" onclick="toggleEasyHands()">&#127919; EasyHands</button>
     </div>
   </div>
 
@@ -659,11 +661,22 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
 <!-- Collision warning -->
 <div class="collision-warning" id="collisionWarning">&#9888; COLLISION WARNING - Vessels in close proximity!</div>
 
+<!-- Diagnostic overlay -->
+<div id="diagOverlay" style="position:fixed; left:12px; bottom:12px; z-index:99999; background:rgba(0,0,0,0.9); color:#0f0; font-family:monospace; font-size:12px; padding:10px 14px; border-radius:8px; border:1px solid #0f0; pointer-events:none; white-space:pre; line-height:1.5;"></div>
+
 <!-- Hand tracking elements -->
 <video id="handVideo" autoplay playsinline style="display:none;"></video>
 <canvas id="handDebug" width="640" height="480" style="position:fixed; right:12px; bottom:12px; width:320px; height:240px; z-index:9999; border:1px solid rgba(255,255,255,0.2); border-radius:10px; display:none;"></canvas>
 
 <script>
+// Global error catcher — writes to diagnostic overlay
+window.onerror = function(msg, url, line, col, err) {
+  const diag = document.getElementById('diagOverlay');
+  if (diag) diag.textContent = `[JS ERROR] Line ${line}: ${msg}`;
+  console.error('[Global Error]', msg, 'at line', line, col, err);
+  return false; // don't suppress
+};
+
 // ================================================================
 //  PHASE 1: ENHANCED DATA MODELS
 // ================================================================
@@ -2204,13 +2217,42 @@ initVessels();
 updateStats();
 updateFilterDropdowns();
 
-// Main loop
+// Main loop — requestAnimationFrame FIRST so errors can't kill the loop
 let lastTime = performance.now();
+let diagFrameCount = 0;
+let diagLastError = 'none';
+let diagSimCalls = 0;
+
 function animate(now) {
+  requestAnimationFrame(animate);
+  diagFrameCount++;
   const dt = (now - lastTime) / 1000;
   lastTime = now;
-  if (playing) updateSim(dt);
-  requestAnimationFrame(animate);
+  if (playing) {
+    try {
+      updateSim(dt);
+      diagSimCalls++;
+    } catch(e) {
+      diagLastError = e.message || String(e);
+      console.error('[Sim] updateSim error:', e);
+    }
+  }
+
+  // Update diagnostic overlay every 30 frames
+  if (diagFrameCount % 30 === 0) {
+    const diag = document.getElementById('diagOverlay');
+    if (diag) {
+      const v0 = vessels.length > 0 ? vessels[0] : null;
+      const v0info = v0
+        ? `pos: ${v0.marker.getLatLng().lat.toFixed(3)},${v0.marker.getLatLng().lng.toFixed(3)} prog: ${v0.progress.toFixed(4)} spd: ${v0.speed.toFixed(1)}`
+        : 'no vessels';
+      diag.textContent =
+        `[DIAG] frames: ${diagFrameCount} | simCalls: ${diagSimCalls}\n` +
+        `playing: ${playing} | vessels: ${vessels.length} | simSpeed: ${simSpeed}\n` +
+        `ship[0]: ${v0info}\n` +
+        `lastErr: ${diagLastError}`;
+    }
+  }
 }
 requestAnimationFrame(animate);
 
@@ -2234,125 +2276,322 @@ document.addEventListener('keydown', e => {
 map.on('click', () => { closeShipPanel(); closePortPanel(); });
 </script>
 
-<!-- MediaPipe Hand Tracking -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<!-- MediaPipe Hand Tracking — loaded async so they never block simulation -->
 <script>
 // ================================================================
-//  HAND GESTURE CONTROL (MediaPipe)
+//  HAND GESTURE CONTROL (MediaPipe) — FIXED + EASYHANDS
 // ================================================================
 let handMode = false;
 let handPinch = false;
 let handCursorMarker = null;
 let camera = null;
 let handsInstance = null;
+let easyHandsMode = false;
+let easyHandsTargetLine = null;
+let easyHandsHighlight = null;
+let handSmoothedX = 0.5, handSmoothedY = 0.5;
+let mediaPipeReady = false;
+const HAND_SMOOTH = 0.35; // lower = smoother, higher = more responsive
 
 const videoEl = document.getElementById('handVideo');
 const debugCanvas = document.getElementById('handDebug');
 const dctx = debugCanvas.getContext('2d');
+
+// Load MediaPipe scripts dynamically (async, non-blocking)
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => { console.warn('[MediaPipe] Failed to load:', src); resolve(); };
+    document.head.appendChild(s);
+  });
+}
+
+(async function loadMediaPipe() {
+  console.log('[MediaPipe] Loading libraries...');
+  await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js');
+  await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js');
+  await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js');
+
+  if (typeof Hands === 'undefined') {
+    console.error('[MediaPipe] Hands library failed to load. Hand tracking unavailable.');
+    return;
+  }
+  console.log('%c[MediaPipe] All libraries loaded successfully', 'color: #4ade80; font-weight: bold');
+  mediaPipeReady = true;
+  initHandTracking();
+})();
+
+// MediaPipe hand connections (21 landmarks, standard topology)
+const HAND_CONN = [
+    [0,1],[1,2],[2,3],[3,4],       // thumb
+    [0,5],[5,6],[6,7],[7,8],       // index
+    [0,9],[9,10],[10,11],[11,12],   // middle  (was [5,9])
+    [0,13],[13,14],[14,15],[15,16], // ring    (was [9,13])
+    [0,17],[17,18],[18,19],[19,20], // pinky   (was [13,17])
+    [5,9],[9,13],[13,17]            // palm cross-connections
+];
 
 function normDist(a, b) {
     const dx = a.x - b.x, dy = a.y - b.y;
     return Math.sqrt(dx * dx + dy * dy);
 }
 
-function isPinching(lm) {
-    return normDist(lm[4], lm[8]) < 0.05;
+const PINCH_THRESHOLD = 0.07;
+
+function isPinchingHand(lm) {
+    const d = normDist(lm[4], lm[8]);
+    return { pinching: d < PINCH_THRESHOLD, distance: d };
 }
 
 function handToLatLng(nx, ny) {
     const mapEl = document.getElementById('map');
     const r = mapEl.getBoundingClientRect();
-    const px = nx * r.width;
+    // Mirror X axis (webcam is mirrored)
+    const px = (1 - nx) * r.width;
     const py = ny * r.height;
     return map.containerPointToLatLng([px, py]);
 }
 
-function chooseVessel(latlng) {
+function findNearestVessel(latlng) {
     let best = null, bestD = Infinity;
     for (const v of vessels) {
         const d = map.distance(latlng, v.marker.getLatLng());
         if (d < bestD) { bestD = d; best = v; }
     }
-    return bestD < 800 ? best : null;
+    return { vessel: best, distance: bestD };
 }
 
-// Initialize MediaPipe Hands
-handsInstance = new Hands({
-    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-});
+const GRAB_RADIUS = 5000; // 5km radius for normal hand mode
 
-handsInstance.setOptions({
-    maxNumHands: 1,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.7,
-    minTrackingConfidence: 0.7
-});
+function chooseVessel(latlng) {
+    const { vessel, distance } = findNearestVessel(latlng);
+    if (easyHandsMode) {
+        // EasyHands: no distance limit
+        console.log(`[EasyHands] Nearest ship: ${vessel ? vessel.name + ' (id:' + vessel.id + ')' : 'none'} at ${Math.round(distance)}m — AUTO-GRAB`);
+        return vessel;
+    }
+    console.log(`[Hand] Nearest ship: ${vessel ? vessel.name + ' (id:' + vessel.id + ')' : 'none'} at ${Math.round(distance)}m (radius: ${GRAB_RADIUS}m)`);
+    return distance < GRAB_RADIUS ? vessel : null;
+}
 
-handsInstance.onResults((res) => {
+function grabVessel(v, latlng) {
+    console.log(`%c✓ GRABBED SHIP: ${v.name} (id:${v.id})`, 'color: #4ade80; font-weight: bold; font-size: 14px');
+    draggingVessel = v;
+    dragOriginalPos = { lat: v.marker.getLatLng().lat, lng: v.marker.getLatLng().lng };
+    dragWasPaused = !playing;
+    if (playing) togglePlay();
+
+    // Show old route
+    const remainingRoute = [];
+    for (let p = v.progress; p <= 1; p += 0.02) {
+        const pt = positionOnRoute(v.route, Math.min(p, 1));
+        remainingRoute.push([pt.lat, pt.lng]);
+    }
+    dragOldRouteLine = L.polyline(remainingRoute, {
+        color: '#64748b', weight: 2.5, opacity: 0.6, dashArray: '6,4'
+    }).addTo(map);
+
+    document.getElementById('dragOverlay').classList.add('show');
+}
+
+// Draw hand skeleton manually on debug canvas
+function drawHandSkeleton(lm, pinching, pinchDist) {
+    const w = debugCanvas.width, h = debugCanvas.height;
+
+    // Draw connections
+    dctx.lineWidth = 2;
+    for (const [i, j] of HAND_CONN) {
+        // Mirror X for display consistency
+        const x1 = lm[i].x * w, y1 = lm[i].y * h;
+        const x2 = lm[j].x * w, y2 = lm[j].y * h;
+        dctx.strokeStyle = pinching ? '#4ade80' : '#38bdf8';
+        dctx.beginPath();
+        dctx.moveTo(x1, y1);
+        dctx.lineTo(x2, y2);
+        dctx.stroke();
+    }
+
+    // Draw landmarks
+    for (let i = 0; i < lm.length; i++) {
+        const x = lm[i].x * w, y = lm[i].y * h;
+        const isThumbTip = i === 4;
+        const isIndexTip = i === 8;
+        dctx.beginPath();
+        if (isIndexTip) {
+            // Cyan highlight for index fingertip
+            dctx.arc(x, y, 6, 0, Math.PI * 2);
+            dctx.fillStyle = '#22d3ee';
+            dctx.fill();
+            dctx.strokeStyle = '#fff';
+            dctx.lineWidth = 2;
+            dctx.stroke();
+        } else if (isThumbTip) {
+            dctx.arc(x, y, 5, 0, Math.PI * 2);
+            dctx.fillStyle = pinching ? '#4ade80' : '#f59e0b';
+            dctx.fill();
+        } else {
+            dctx.arc(x, y, 3, 0, Math.PI * 2);
+            dctx.fillStyle = pinching ? '#4ade80' : '#f87171';
+            dctx.fill();
+        }
+    }
+
+    // Draw line between thumb and index tip
+    const tx = lm[4].x * w, ty = lm[4].y * h;
+    const ix = lm[8].x * w, iy = lm[8].y * h;
+    dctx.setLineDash([4, 4]);
+    dctx.strokeStyle = pinching ? '#4ade80' : '#f59e0b';
+    dctx.lineWidth = 2;
+    dctx.beginPath();
+    dctx.moveTo(tx, ty);
+    dctx.lineTo(ix, iy);
+    dctx.stroke();
+    dctx.setLineDash([]);
+
+    // Text overlay: pinch status
+    dctx.font = 'bold 14px monospace';
+    dctx.fillStyle = pinching ? '#4ade80' : '#f87171';
+    dctx.fillText(`PINCH: ${pinching ? 'YES' : 'NO'}`, 10, 20);
+    dctx.fillStyle = '#e2e8f0';
+    dctx.font = '12px monospace';
+    dctx.fillText(`Dist: ${pinchDist.toFixed(3)} (thr: ${PINCH_THRESHOLD})`, 10, 38);
+
+    if (draggingVessel) {
+        dctx.fillStyle = '#f59e0b';
+        dctx.font = 'bold 13px monospace';
+        dctx.fillText(`DRAGGING: ${draggingVessel.name}`, 10, 56);
+    }
+}
+
+// Update EasyHands targeting visuals
+function updateEasyHandsVisuals(latlng) {
+    const { vessel, distance } = findNearestVessel(latlng);
+
+    // Clean up old visuals
+    if (easyHandsTargetLine) { map.removeLayer(easyHandsTargetLine); easyHandsTargetLine = null; }
+    if (easyHandsHighlight) { map.removeLayer(easyHandsHighlight); easyHandsHighlight = null; }
+
+    if (!vessel || draggingVessel) return;
+
+    const shipPos = vessel.marker.getLatLng();
+
+    // Cyan dotted line from cursor to nearest ship
+    easyHandsTargetLine = L.polyline([[latlng.lat, latlng.lng], [shipPos.lat, shipPos.lng]], {
+        color: '#22d3ee', weight: 2, opacity: 0.7, dashArray: '6,4', interactive: false
+    }).addTo(map);
+
+    // Cyan highlight ring around nearest ship
+    easyHandsHighlight = L.circleMarker(shipPos, {
+        radius: 14, color: '#22d3ee', fillColor: '#22d3ee',
+        fillOpacity: 0.15, weight: 2, interactive: false
+    }).addTo(map);
+
+    // Show target info on debug canvas
+    dctx.fillStyle = '#22d3ee';
+    dctx.font = 'bold 12px monospace';
+    const distKm = (distance / 1000).toFixed(1);
+    dctx.fillText(`TARGET: ${vessel.name} (${distKm}km)`, 10, debugCanvas.height - 14);
+}
+
+// Clear EasyHands visuals
+function clearEasyHandsVisuals() {
+    if (easyHandsTargetLine) { map.removeLayer(easyHandsTargetLine); easyHandsTargetLine = null; }
+    if (easyHandsHighlight) { map.removeLayer(easyHandsHighlight); easyHandsHighlight = null; }
+}
+
+function initHandTracking() {
+  console.log('[MediaPipe] Initializing hand tracking...');
+  handsInstance = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  handsInstance.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+  });
+
+  handsInstance.onResults((res) => {
     dctx.clearRect(0, 0, debugCanvas.width, debugCanvas.height);
     if (res.image) dctx.drawImage(res.image, 0, 0, debugCanvas.width, debugCanvas.height);
 
     if (!handMode) return;
-    if (!res.multiHandLandmarks || !res.multiHandLandmarks.length) return;
+
+    if (!res.multiHandLandmarks || !res.multiHandLandmarks.length) {
+        // No hand detected — show warning
+        dctx.font = 'bold 16px monospace';
+        dctx.fillStyle = '#f87171';
+        dctx.fillText('NO HAND DETECTED', 10, 30);
+        dctx.font = '12px monospace';
+        dctx.fillStyle = '#94a3b8';
+        dctx.fillText('Show your hand to the camera', 10, 50);
+        return;
+    }
 
     const lm = res.multiHandLandmarks[0];
     const tip = lm[8]; // index finger tip
-    const pinching = isPinching(lm);
-    const latlng = handToLatLng(tip.x, tip.y);
+    const { pinching, distance: pinchDist } = isPinchingHand(lm);
 
-    // Draw landmarks on debug canvas
-    if (res.multiHandLandmarks) {
-        for (const landmarks of res.multiHandLandmarks) {
-            drawConnectors(dctx, landmarks, HAND_CONNECTIONS, { color: pinching ? '#4ade80' : '#38bdf8', lineWidth: 2 });
-            drawLandmarks(dctx, landmarks, { color: pinching ? '#4ade80' : '#f87171', lineWidth: 1, radius: 3 });
-        }
-    }
+    console.log(`[Hand] Pinch distance: ${pinchDist.toFixed(3)}, Pinching: ${pinching}`);
+
+    // Smooth cursor position
+    handSmoothedX += (tip.x - handSmoothedX) * HAND_SMOOTH;
+    handSmoothedY += (tip.y - handSmoothedY) * HAND_SMOOTH;
+
+    const latlng = handToLatLng(handSmoothedX, handSmoothedY);
+    console.log(`[Hand] Fingertip norm: ${handSmoothedX.toFixed(3)}, ${handSmoothedY.toFixed(3)} -> Map: ${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`);
+
+    // Draw hand skeleton on debug canvas
+    drawHandSkeleton(lm, pinching, pinchDist);
+
+    // Determine cursor color
+    const cursorColor = easyHandsMode ? '#22d3ee' : '#4ade80';
+    const cursorPinchColor = '#f59e0b';
 
     // Update cursor marker on map
     if (!handCursorMarker) {
         handCursorMarker = L.circleMarker(latlng, {
-            radius: 8,
-            color: '#4ade80',
-            fillColor: '#4ade80',
-            fillOpacity: 0.6
+            radius: 8, color: cursorColor, fillColor: cursorColor,
+            fillOpacity: 0.6, interactive: false
         }).addTo(map);
     } else {
         handCursorMarker.setLatLng(latlng);
     }
 
-    // Update cursor color based on pinch state
     handCursorMarker.setStyle({
-        color: pinching ? '#f59e0b' : '#4ade80',
-        fillColor: pinching ? '#f59e0b' : '#4ade80',
+        color: pinching ? cursorPinchColor : cursorColor,
+        fillColor: pinching ? cursorPinchColor : cursorColor,
         radius: pinching ? 12 : 8
     });
 
-    // Pinch start: grab a vessel
+    // EasyHands targeting visuals (when not dragging)
+    if (easyHandsMode && !draggingVessel) {
+        updateEasyHandsVisuals(latlng);
+    }
+
+    // === PINCH START: grab a vessel ===
     if (pinching && !handPinch) {
-        const v = chooseVessel(latlng);
-        if (v && !draggingVessel) {
-            draggingVessel = v;
-            dragOriginalPos = { lat: v.marker.getLatLng().lat, lng: v.marker.getLatLng().lng };
-            dragWasPaused = !playing;
-            if (playing) togglePlay();
+        console.log(`%c[Hand] PINCH START — Distance: ${pinchDist.toFixed(3)}`, 'color: #f59e0b; font-weight: bold');
+        console.log(`[Hand] Finding nearest ship to: ${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`);
 
-            // Show old route
-            const remainingRoute = [];
-            for (let p = v.progress; p <= 1; p += 0.02) {
-                const pt = positionOnRoute(v.route, Math.min(p, 1));
-                remainingRoute.push([pt.lat, pt.lng]);
+        if (!draggingVessel) {
+            const v = chooseVessel(latlng);
+            if (v) {
+                clearEasyHandsVisuals();
+                grabVessel(v, latlng);
+            } else {
+                console.log(`%c✗ GRAB FAILED: No ship within radius`, 'color: #f87171; font-weight: bold');
+                console.log(`[Hand] draggingVessel: null`);
             }
-            dragOldRouteLine = L.polyline(remainingRoute, {
-                color: '#64748b', weight: 2.5, opacity: 0.6, dashArray: '6,4'
-            }).addTo(map);
-
-            document.getElementById('dragOverlay').classList.add('show');
+        } else {
+            console.log(`[Hand] Already dragging: ${draggingVessel.name} (id:${draggingVessel.id})`);
         }
     }
 
-    // During pinch: drag vessel
+    // === DURING PINCH: drag vessel ===
     if (pinching && draggingVessel) {
         draggingVessel.marker.setLatLng(latlng);
         const destPoint = draggingVessel.route[draggingVessel.route.length - 1];
@@ -2368,15 +2607,24 @@ handsInstance.onResults((res) => {
         updateDragOverlay(dragFinancials);
     }
 
-    // Pinch release: keep overlay open for confirm/cancel buttons
+    // === PINCH RELEASE ===
     if (!pinching && handPinch) {
-        // User released pinch - overlay stays with Confirm/Cancel buttons
+        console.log(`%c[Hand] PINCH RELEASE`, 'color: #38bdf8; font-weight: bold');
+        // Overlay stays open for Confirm/Cancel
     }
 
     handPinch = pinching;
-});
+  });
+
+  console.log('%c[MediaPipe] Hand tracking initialized', 'color: #4ade80; font-weight: bold');
+} // end initHandTracking
 
 function toggleHandMode() {
+    if (!mediaPipeReady) {
+        console.warn('[Hand Mode] MediaPipe not loaded yet. Please wait...');
+        alert('Hand tracking libraries are still loading. Please try again in a moment.');
+        return;
+    }
     handMode = !handMode;
     const btn = document.getElementById('btnHand');
 
@@ -2384,28 +2632,62 @@ function toggleHandMode() {
         btn.classList.add('active');
         btn.textContent = '\u270B Hand: ON';
         debugCanvas.style.display = 'block';
+        console.log('%c[Hand Mode] ENABLED', 'color: #4ade80; font-weight: bold; font-size: 14px');
         if (!camera) {
             camera = new Camera(videoEl, {
-                onFrame: async () => { await handsInstance.send({ image: videoEl }); },
+                onFrame: async () => {
+                    try { await handsInstance.send({ image: videoEl }); }
+                    catch(e) { console.error('[Hand] Frame error:', e); }
+                },
                 width: 640, height: 480
             });
             camera.start();
+            console.log('[Hand] Camera started');
         }
     } else {
         btn.classList.remove('active');
         btn.textContent = '\u270B Hand Mode';
         debugCanvas.style.display = 'none';
+        console.log('%c[Hand Mode] DISABLED', 'color: #f87171; font-weight: bold; font-size: 14px');
         if (handCursorMarker) {
             map.removeLayer(handCursorMarker);
             handCursorMarker = null;
         }
+        clearEasyHandsVisuals();
+        // Auto-disable EasyHands
+        if (easyHandsMode) {
+            easyHandsMode = false;
+            document.getElementById('btnEasyHands').classList.remove('active');
+            document.getElementById('btnEasyHands').textContent = '\uD83C\uDFAF EasyHands';
+        }
     }
 }
 
-// Add keyboard shortcut for hand mode
+function toggleEasyHands() {
+    easyHandsMode = !easyHandsMode;
+    const btn = document.getElementById('btnEasyHands');
+
+    if (easyHandsMode) {
+        btn.classList.add('active');
+        btn.textContent = '\uD83C\uDFAF Easy: ON';
+        console.log('%c[EasyHands] ENABLED — pinch anywhere to grab nearest ship', 'color: #22d3ee; font-weight: bold; font-size: 14px');
+        // Auto-enable Hand Mode
+        if (!handMode) {
+            toggleHandMode();
+        }
+    } else {
+        btn.classList.remove('active');
+        btn.textContent = '\uD83C\uDFAF EasyHands';
+        console.log('%c[EasyHands] DISABLED', 'color: #94a3b8; font-weight: bold');
+        clearEasyHandsVisuals();
+    }
+}
+
+// Keyboard shortcuts for hand modes
 document.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
     if (e.code === 'KeyG') toggleHandMode();
+    if (e.code === 'KeyE') toggleEasyHands();
 });
 </script>
 </body>

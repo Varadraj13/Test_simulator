@@ -10,271 +10,369 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; height: 100vh; }
+body { font-family: Helvetica, Arial, sans-serif; overflow: hidden; height: 100vh; background: #080808; color: #888888; }
 #map { width: 100%; height: 100vh; z-index: 1; }
+
+/* ===== VESSEL CROSS MARKER ===== */
+@keyframes crossPulse { 0%,100% { opacity:0.6; } 50% { opacity:1.0; } }
+.vessel-cross { position: relative; width: 12px; height: 12px; cursor: pointer; }
+.vessel-cross .cross-h { position: absolute; top: 4.5px; left: 0; width: 12px; height: 3px; background: #cc0000; }
+.vessel-cross .cross-v { position: absolute; top: 0; left: 4.5px; width: 3px; height: 12px; background: #cc0000; }
+.vessel-cross .cross-h, .vessel-cross .cross-v { animation: crossPulse 2s ease-in-out infinite; }
+.vessel-cross:hover .cross-h, .vessel-cross:hover .cross-v { background: #ffffff; }
+.vessel-cross.selected { width: 14px; height: 14px; border: 2px solid #cc0000; background: transparent; }
+.vessel-cross.selected .cross-h, .vessel-cross.selected .cross-v { display: none; }
+/* Vessel floating label — always visible */
+.vessel-datacard {
+  position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+  pointer-events: none; opacity: 1;
+  white-space: nowrap; text-align: center; z-index: 10;
+  background: rgba(8,8,8,0.82); border: 1px solid #1a1a1a;
+  padding: 2px 5px; line-height: 1.3;
+}
+.vessel-datacard .vdc-name { font-size: 8px; color: #cccccc; letter-spacing: 1px; text-transform: uppercase; }
+.vessel-datacard .vdc-type { font-size: 7px; color: #555555; font-family: Helvetica, Arial, sans-serif; }
+.vessel-datacard .vdc-speed { font-size: 7px; color: #cc0000; font-family: Helvetica, Arial, sans-serif; }
+.vessel-datacard .vdc-imo { display: none; }
+
+/* Vessel results section in right panel */
+#vessel-results { margin-top: 8px; border-top: 1px solid #1a1a1a; }
+#vessel-results .vr-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0 4px;
+}
+#vessel-results .vr-title {
+  font-size: 8px; color: #cc0000; letter-spacing: 2px; text-transform: uppercase;
+}
+#vessel-results .vr-clear {
+  background: none; border: none; color: #444444; font-size: 8px; cursor: pointer;
+  font-family: Helvetica, Arial, sans-serif; letter-spacing: 1px; text-transform: uppercase;
+  padding: 0;
+}
+#vessel-results .vr-clear:hover { color: #cc0000; }
+#vessel-results .vr-body {
+  max-height: 240px; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: #222222 transparent;
+}
+#vessel-results .vr-body::-webkit-scrollbar { width: 3px; }
+#vessel-results .vr-body::-webkit-scrollbar-thumb { background: #222222; }
+#vessel-results .vr-empty {
+  font-size: 9px; color: #333333; letter-spacing: 1px; padding: 8px 0;
+  text-transform: uppercase;
+}
+#vessel-results .vr-coords {
+  font-size: 8px; color: #333333; letter-spacing: 1px; margin-bottom: 4px;
+}
 
 /* ===== CONTROL PANEL ===== */
 #controls {
   position: absolute; top: 12px; right: 12px; z-index: 1000;
-  background: rgba(15, 23, 42, 0.94); color: #e2e8f0;
-  border-radius: 12px; padding: 14px 16px; width: 290px;
-  backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,0.08);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-  font-size: 13px; max-height: calc(100vh - 24px); overflow-y: auto;
-  scrollbar-width: thin; scrollbar-color: #334155 transparent;
+  background: #0a0a0a; color: #888888;
+  border-radius: 0; padding: 14px 16px; width: 220px;
+  border: 1px solid #1a1a1a;
+  font-size: 10px; max-height: calc(100vh - 24px); overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: #222222 transparent;
 }
-#controls::-webkit-scrollbar { width: 4px; }
-#controls::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
-#controls h2 { font-size: 15px; margin-bottom: 10px; color: #38bdf8; display: flex; align-items: center; gap: 8px; }
-#controls h2::before { content: "\2693"; font-size: 18px; }
+#controls::-webkit-scrollbar { width: 3px; }
+#controls::-webkit-scrollbar-thumb { background: #222222; border-radius: 0; }
+#controls h2 { font-size: 10px; margin-bottom: 2px; color: #cc0000; letter-spacing: 4px; text-transform: uppercase; font-weight: 400; }
+#controls h2::before { content: none; }
+.ctrl-subtitle { font-size: 8px; color: #333333; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 10px; }
 
 .ctrl-group { margin-bottom: 10px; }
-.ctrl-group label { display: block; margin-bottom: 3px; color: #94a3b8; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.ctrl-group label { display: block; margin-bottom: 3px; color: #444444; font-size: 8px; text-transform: uppercase; letter-spacing: 2px; font-family: Helvetica, Arial, sans-serif; }
 
-.btn-row { display: flex; gap: 5px; flex-wrap: wrap; }
+.btn-row { display: flex; gap: 4px; flex-wrap: wrap; }
 .btn {
-  background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.25);
-  color: #38bdf8; padding: 5px 11px; border-radius: 6px; cursor: pointer;
-  font-size: 11px; transition: all 0.2s; white-space: nowrap;
+  background: transparent; border: 1px solid #222222;
+  color: #666666; padding: 4px 8px; border-radius: 0; cursor: pointer;
+  font-size: 9px; transition: all 0.15s; white-space: nowrap;
+  letter-spacing: 2px; text-transform: uppercase; font-family: Helvetica, Arial, sans-serif;
 }
-.btn:hover { background: rgba(56, 189, 248, 0.28); }
-.btn.active { background: rgba(56, 189, 248, 0.4); border-color: #38bdf8; }
-#btnHand.active { background: #4ade80; color: #0a0e27; border-color: #4ade80; }
-#btnEasyHands.active { background: linear-gradient(135deg, #22d3ee, #06b6d4); color: #0a0e27; border-color: #22d3ee; }
-.btn.danger { color: #f87171; border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.08); }
-.btn.danger:hover { background: rgba(248,113,113,0.22); }
-.btn.success { color: #4ade80; border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.08); }
-.btn.success:hover { background: rgba(74,222,128,0.22); }
+.btn:hover { border-color: #cc0000; color: #ffffff; }
+.btn.active { border-color: #cc0000; color: #cc0000; background: transparent; }
+#btnHand.active { background: transparent; color: #cc0000; border-color: #cc0000; }
+#btnEasyHands.active { background: transparent; color: #cc0000; border-color: #cc0000; }
+.btn.danger { color: #666666; border-color: #222222; background: transparent; }
+.btn.danger:hover { border-color: #cc0000; color: #ffffff; }
+.btn.success { color: #666666; border-color: #222222; background: transparent; }
+.btn.success:hover { border-color: #cc0000; color: #ffffff; }
 
-input[type="range"] { width: 100%; accent-color: #38bdf8; margin-top: 2px; }
+/* Range slider */
+input[type="range"] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 1px;
+  background: #1a1a1a; outline: none; margin-top: 6px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 8px; height: 8px;
+  background: #cc0000; border-radius: 0; cursor: pointer; border: none;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 8px; height: 8px; background: #cc0000; border-radius: 0; cursor: pointer; border: none;
+}
 
-.stats { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 4px; background: rgba(0,0,0,0.2); border-radius: 8px; padding: 8px; }
+.stats { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 4px; padding: 8px 0; border-bottom: 1px solid #1a1a1a; }
 .stat-item { text-align: center; }
-.stat-val { font-size: 16px; font-weight: 700; color: #38bdf8; }
-.stat-lbl { font-size: 9px; color: #64748b; text-transform: uppercase; }
+.stat-val { font-size: 18px; font-weight: 300; color: #ffffff; font-family: Helvetica, Arial, sans-serif; }
+.stat-lbl { font-size: 7px; color: #444444; text-transform: uppercase; letter-spacing: 2px; }
 
 .legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
-.legend-item { display: flex; align-items: center; gap: 3px; font-size: 10px; }
-.legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+.legend-item { display: flex; align-items: center; gap: 3px; font-size: 8px; color: #444444; letter-spacing: 1px; text-transform: uppercase; }
+.legend-dot { width: 6px; height: 6px; border-radius: 0; }
 
 /* Tabs */
-.tab-bar { display: flex; gap: 2px; margin-bottom: 8px; background: rgba(0,0,0,0.2); border-radius: 6px; padding: 2px; }
-.tab-btn { flex: 1; text-align: center; padding: 5px 4px; font-size: 10px; cursor: pointer; border-radius: 4px; color: #94a3b8; transition: all 0.2s; border: none; background: none; text-transform: uppercase; letter-spacing: 0.3px; }
-.tab-btn:hover { color: #e2e8f0; }
-.tab-btn.active { background: rgba(56,189,248,0.2); color: #38bdf8; }
+.tab-bar { display: flex; gap: 0; margin-bottom: 8px; border-bottom: 1px solid #1a1a1a; padding: 0; background: none; border-radius: 0; }
+.tab-btn { flex: 1; text-align: center; padding: 5px 4px; font-size: 8px; cursor: pointer; color: #444444; transition: all 0.15s; border: none; background: none; text-transform: uppercase; letter-spacing: 3px; border-bottom: 1px solid transparent; font-family: Helvetica, Arial, sans-serif; border-radius: 0; }
+.tab-btn:hover { color: #888888; }
+.tab-btn.active { background: none; color: #cc0000; border-bottom: 1px solid #cc0000; }
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
 /* Filter */
 .filter-row { display: flex; gap: 4px; margin-bottom: 6px; }
 .filter-row select, .filter-row input {
-  flex: 1; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);
-  color: #e2e8f0; border-radius: 4px; padding: 4px 6px; font-size: 11px;
+  flex: 1; background: #0a0a0a; border: 1px solid #1a1a1a;
+  color: #888888; border-radius: 0; padding: 4px 6px; font-size: 10px;
+  font-family: Helvetica, Arial, sans-serif;
 }
-.filter-row select option { background: #1e293b; }
+.filter-row select option { background: #0a0a0a; }
 
 /* ===== SHIP DETAIL PANEL ===== */
 #shipPanel {
   position: absolute; top: 0; left: -420px; z-index: 1001;
-  width: 410px; height: 100vh; background: rgba(15, 23, 42, 0.96);
-  border-right: 1px solid rgba(255,255,255,0.08);
-  backdrop-filter: blur(16px); color: #e2e8f0; overflow-y: auto;
+  width: 410px; height: 100vh; background: #0a0a0a;
+  border-right: 1px solid #1a1a1a;
+  color: #888888; overflow-y: auto;
   transition: left 0.35s cubic-bezier(0.4,0,0.2,1);
-  scrollbar-width: thin; scrollbar-color: #334155 transparent;
+  scrollbar-width: thin; scrollbar-color: #222222 transparent;
 }
 #shipPanel.open { left: 0; }
-#shipPanel::-webkit-scrollbar { width: 5px; }
-#shipPanel::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+#shipPanel::-webkit-scrollbar { width: 3px; }
+#shipPanel::-webkit-scrollbar-thumb { background: #222222; border-radius: 0; }
 
 .sp-header {
-  padding: 16px 18px; background: linear-gradient(135deg, rgba(56,189,248,0.15), rgba(139,92,246,0.1));
-  border-bottom: 1px solid rgba(255,255,255,0.06); position: sticky; top: 0; z-index: 2;
-  backdrop-filter: blur(8px);
+  padding: 16px 18px; background: #0a0a0a;
+  border-bottom: 1px solid #1a1a1a; position: sticky; top: 0; z-index: 2;
 }
-.sp-close { position: absolute; top: 12px; right: 14px; background: none; border: none; color: #94a3b8; font-size: 22px; cursor: pointer; padding: 4px 8px; border-radius: 4px; }
-.sp-close:hover { color: #fff; background: rgba(255,255,255,0.1); }
-.sp-name { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 4px; }
-.sp-badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; color: #fff; font-weight: 600; }
-.sp-imo { color: #94a3b8; font-size: 12px; margin-top: 2px; }
+.sp-close { position: absolute; top: 12px; right: 14px; background: none; border: none; color: #444444; font-size: 18px; cursor: pointer; padding: 4px 8px; border-radius: 0; font-family: Helvetica, Arial, sans-serif; }
+.sp-close:hover { color: #ffffff; background: none; }
+.sp-name { font-size: 14px; font-weight: 400; color: #ffffff; margin-bottom: 4px; letter-spacing: 2px; text-transform: uppercase; }
+.sp-badge { display: inline-block; padding: 2px 8px; border-radius: 0; font-size: 8px; color: #cc0000; font-weight: 400; border: 1px solid #cc0000; background: transparent; letter-spacing: 2px; text-transform: uppercase; }
+.sp-imo { color: #444444; font-size: 10px; margin-top: 4px; font-family: Helvetica, Arial, sans-serif; letter-spacing: 1px; }
 
-.sp-section { padding: 12px 18px; border-bottom: 1px solid rgba(255,255,255,0.04); }
-.sp-section h3 { font-size: 11px; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; margin-bottom: 8px; }
+.sp-section { padding: 12px 18px; border-bottom: 1px solid #1a1a1a; }
+.sp-section h3 { font-size: 8px; text-transform: uppercase; color: #cc0000; letter-spacing: 3px; margin-bottom: 8px; font-weight: 400; }
 
 .sp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.sp-field { background: rgba(0,0,0,0.2); border-radius: 6px; padding: 6px 10px; }
-.sp-field-label { font-size: 9px; text-transform: uppercase; color: #64748b; }
-.sp-field-value { font-size: 13px; font-weight: 600; color: #e2e8f0; }
-.sp-field-value.hazmat { color: #f87171; }
+.sp-field { background: none; border-radius: 0; padding: 4px 0; border-bottom: 1px solid #111111; }
+.sp-field-label { font-size: 8px; text-transform: uppercase; color: #444444; letter-spacing: 2px; }
+.sp-field-value { font-size: 11px; font-weight: 400; color: #ffffff; font-family: Helvetica, Arial, sans-serif; }
+.sp-field-value.hazmat { color: #cc0000; }
 
 .sp-wide { grid-column: 1 / -1; }
 
-.sp-cargo-bar { height: 6px; border-radius: 3px; background: rgba(0,0,0,0.3); margin-top: 4px; overflow: hidden; }
-.sp-cargo-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+.sp-cargo-bar { height: 2px; border-radius: 0; background: #1a1a1a; margin-top: 4px; overflow: hidden; }
+.sp-cargo-fill { height: 100%; border-radius: 0; transition: width 0.5s; background: #cc0000 !important; }
 
 .sp-route-timeline { position: relative; padding-left: 18px; }
-.sp-route-wp { position: relative; padding: 6px 0; font-size: 12px; }
-.sp-route-wp::before { content: ''; position: absolute; left: -14px; top: 12px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid #38bdf8; background: #0f172a; z-index: 1; }
-.sp-route-wp.active::before { background: #38bdf8; box-shadow: 0 0 6px #38bdf8; }
-.sp-route-wp.done::before { background: #22c55e; border-color: #22c55e; }
-.sp-route-wp:not(:last-child)::after { content: ''; position: absolute; left: -11px; top: 20px; width: 2px; height: calc(100% - 8px); background: rgba(56,189,248,0.2); }
+.sp-route-wp { position: relative; padding: 6px 0; font-size: 10px; color: #888888; }
+.sp-route-wp::before { content: ''; position: absolute; left: -14px; top: 12px; width: 6px; height: 6px; border-radius: 0; border: 1px solid #cc0000; background: #0a0a0a; z-index: 1; }
+.sp-route-wp.active::before { background: #cc0000; }
+.sp-route-wp.done::before { background: #444444; border-color: #444444; }
+.sp-route-wp:not(:last-child)::after { content: ''; position: absolute; left: -12px; top: 18px; width: 1px; height: calc(100% - 6px); background: #1a1a1a; }
 
 .sp-telemetry { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-.sp-tele-item { text-align: center; background: rgba(0,0,0,0.25); border-radius: 6px; padding: 8px 4px; }
-.sp-tele-val { font-size: 18px; font-weight: 700; color: #38bdf8; }
-.sp-tele-lbl { font-size: 9px; color: #64748b; text-transform: uppercase; }
+.sp-tele-item { text-align: center; background: none; border-radius: 0; padding: 8px 4px; border-bottom: 1px solid #1a1a1a; }
+.sp-tele-val { font-size: 18px; font-weight: 300; color: #ffffff; font-family: Helvetica, Arial, sans-serif; }
+.sp-tele-lbl { font-size: 8px; color: #444444; text-transform: uppercase; letter-spacing: 2px; }
 
 .sp-chart-container { height: 120px; margin-top: 6px; }
 
 /* ===== PORT PANEL ===== */
 #portPanel {
   position: absolute; top: 0; left: -480px; z-index: 1001;
-  width: 470px; height: 100vh; background: rgba(15, 23, 42, 0.96);
-  border-right: 1px solid rgba(255,255,255,0.08);
-  backdrop-filter: blur(16px); color: #e2e8f0; overflow-y: auto;
+  width: 470px; height: 100vh; background: #0a0a0a;
+  border-right: 1px solid #1a1a1a;
+  color: #888888; overflow-y: auto;
   transition: left 0.35s cubic-bezier(0.4,0,0.2,1);
-  scrollbar-width: thin; scrollbar-color: #334155 transparent;
+  scrollbar-width: thin; scrollbar-color: #222222 transparent;
 }
 #portPanel.open { left: 0; }
 .pp-header {
-  padding: 16px 18px; background: linear-gradient(135deg, rgba(251,191,36,0.15), rgba(245,158,11,0.1));
-  border-bottom: 1px solid rgba(255,255,255,0.06); position: sticky; top: 0; z-index: 2;
+  padding: 16px 18px; background: #0a0a0a;
+  border-bottom: 1px solid #1a1a1a; position: sticky; top: 0; z-index: 2;
 }
-.pp-name { font-size: 18px; font-weight: 700; color: #fbbf24; }
-.pp-sub { font-size: 12px; color: #94a3b8; }
+.pp-name { font-size: 14px; font-weight: 400; color: #cc0000; letter-spacing: 2px; text-transform: uppercase; }
+.pp-sub { font-size: 10px; color: #444444; letter-spacing: 1px; }
 
-.pp-section { padding: 12px 18px; border-bottom: 1px solid rgba(255,255,255,0.04); }
-.pp-section h3 { font-size: 11px; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; margin-bottom: 8px; }
+.pp-section { padding: 12px 18px; border-bottom: 1px solid #1a1a1a; }
+.pp-section h3 { font-size: 8px; text-transform: uppercase; color: #cc0000; letter-spacing: 3px; margin-bottom: 8px; font-weight: 400; }
 
 .pp-ship-list { max-height: 160px; overflow-y: auto; }
-.pp-ship-item { display: flex; justify-content: space-between; align-items: center; padding: 5px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; }
-.pp-ship-item:hover { background: rgba(255,255,255,0.05); }
-.pp-ship-dot { width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; display: inline-block; }
+.pp-ship-item { display: flex; justify-content: space-between; align-items: center; padding: 5px 8px; border-radius: 0; font-size: 10px; cursor: pointer; color: #888888; }
+.pp-ship-item:hover { background: rgba(204,0,0,0.05); }
+.pp-ship-dot { width: 4px; height: 4px; border-radius: 0; margin-right: 6px; display: inline-block; }
 
 .pp-stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-.pp-stat { text-align: center; background: rgba(0,0,0,0.2); border-radius: 6px; padding: 8px 4px; }
-.pp-stat-val { font-size: 16px; font-weight: 700; color: #fbbf24; }
-.pp-stat-lbl { font-size: 9px; color: #64748b; text-transform: uppercase; }
+.pp-stat { text-align: center; background: none; border-radius: 0; padding: 8px 4px; border-bottom: 1px solid #1a1a1a; }
+.pp-stat-val { font-size: 16px; font-weight: 300; color: #ffffff; font-family: Helvetica, Arial, sans-serif; }
+.pp-stat-lbl { font-size: 8px; color: #444444; text-transform: uppercase; letter-spacing: 2px; }
 
 .pp-chart { height: 140px; margin-top: 4px; }
-.pp-commodity-bar { display: flex; align-items: center; gap: 8px; font-size: 11px; margin-bottom: 4px; }
-.pp-commodity-fill { height: 14px; border-radius: 3px; min-width: 4px; transition: width 0.3s; }
-.pp-commodity-label { min-width: 80px; color: #94a3b8; }
-.pp-commodity-val { color: #e2e8f0; font-weight: 600; min-width: 50px; text-align: right; }
+.pp-commodity-bar { display: flex; align-items: center; gap: 8px; font-size: 10px; margin-bottom: 4px; }
+.pp-commodity-fill { height: 2px; border-radius: 0; min-width: 4px; transition: width 0.3s; background: #cc0000; }
+.pp-commodity-label { min-width: 80px; color: #444444; font-size: 8px; text-transform: uppercase; letter-spacing: 1px; }
+.pp-commodity-val { color: #ffffff; font-weight: 400; min-width: 50px; text-align: right; font-family: Helvetica, Arial, sans-serif; font-size: 10px; }
 
 /* ===== ANALYTICS PANEL (bottom) ===== */
 #analyticsPanel {
   position: absolute; bottom: -320px; left: 50%; transform: translateX(-50%);
   z-index: 1000; width: min(900px, calc(100% - 320px));
-  height: 310px; background: rgba(15, 23, 42, 0.95);
-  border-radius: 12px 12px 0 0; border: 1px solid rgba(255,255,255,0.08);
-  border-bottom: none; backdrop-filter: blur(14px); color: #e2e8f0;
+  height: 310px; background: #0a0a0a;
+  border-radius: 0; border: 1px solid #1a1a1a;
+  border-bottom: none; color: #888888;
   transition: bottom 0.35s cubic-bezier(0.4,0,0.2,1); overflow: hidden;
 }
 #analyticsPanel.open { bottom: 0; }
 .ap-toggle {
-  position: absolute; top: -32px; left: 50%; transform: translateX(-50%);
-  background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255,255,255,0.08);
-  border-bottom: none; border-radius: 8px 8px 0 0;
-  color: #38bdf8; padding: 5px 18px; cursor: pointer; font-size: 11px;
-  text-transform: uppercase; letter-spacing: 0.5px;
+  position: absolute; top: -28px; left: 50%; transform: translateX(-50%);
+  background: #0a0a0a; border: 1px solid #1a1a1a;
+  border-bottom: none; border-radius: 0;
+  color: #cc0000; padding: 4px 16px; cursor: pointer; font-size: 8px;
+  text-transform: uppercase; letter-spacing: 3px; font-family: Helvetica, Arial, sans-serif;
 }
-.ap-toggle:hover { background: rgba(30,40,60,0.95); }
-.ap-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,0.06); }
-.ap-header h3 { font-size: 13px; color: #38bdf8; }
+.ap-toggle:hover { color: #ffffff; }
+.ap-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #1a1a1a; }
+.ap-header h3 { font-size: 8px; color: #cc0000; letter-spacing: 3px; text-transform: uppercase; font-weight: 400; }
 .ap-body { display: flex; height: calc(100% - 42px); }
-.ap-chart-panel { flex: 1; padding: 10px; display: flex; flex-direction: column; }
-.ap-chart-panel h4 { font-size: 10px; text-transform: uppercase; color: #64748b; margin-bottom: 4px; }
+.ap-chart-panel { flex: 1; padding: 10px; display: flex; flex-direction: column; border-right: 1px solid #111111; }
+.ap-chart-panel:last-child { border-right: none; }
+.ap-chart-panel h4 { font-size: 8px; text-transform: uppercase; color: #444444; margin-bottom: 4px; letter-spacing: 2px; font-weight: 400; }
 .ap-chart-wrap { flex: 1; position: relative; }
 
 /* Night mode */
-body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
+body.night-mode #map { filter: brightness(0.5) contrast(1.2) saturate(0.5); }
 
 /* Collision warning */
 .collision-warning {
-  position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-  z-index: 999; background: rgba(220, 38, 38, 0.9); color: #fff;
-  padding: 8px 20px; border-radius: 8px; font-size: 12px; font-weight: 600;
+  position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
+  z-index: 999; background: transparent; color: #cc0000;
+  padding: 6px 16px; border-radius: 0; font-size: 9px; font-weight: 400;
   display: none; animation: pulse 1s infinite;
+  border: 1px solid #cc0000; letter-spacing: 3px; text-transform: uppercase;
+  font-family: Helvetica, Arial, sans-serif;
 }
-@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.7; } }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
 
 /* Heatmap legend */
 .heatmap-legend {
-  position: absolute; bottom: 30px; left: 12px; z-index: 1000;
-  background: rgba(15,23,42,0.9); border-radius: 8px; padding: 8px 12px;
-  color: #e2e8f0; font-size: 10px; display: none;
+  position: absolute; bottom: 40px; left: 12px; z-index: 1000;
+  background: none; border-radius: 0; padding: 4px 0;
+  color: #444444; font-size: 9px; display: none;
+  font-family: Helvetica, Arial, sans-serif; letter-spacing: 2px; text-transform: uppercase;
 }
 .heatmap-legend.show { display: block; }
-.hm-gradient { width: 120px; height: 10px; border-radius: 3px; background: linear-gradient(to right, #00f, #0ff, #0f0, #ff0, #f00); margin: 4px 0; }
+.hm-gradient { width: 120px; height: 1px; border-radius: 0; background: linear-gradient(to right, #1a1a1a, #cc0000, #ffffff); margin: 4px 0; }
+
+/* GFW sonar ping */
+@keyframes sonarPing {
+  0% { width:0;height:0;opacity:0.8;border-width:1px; }
+  100% { width:60px;height:60px;opacity:0;border-width:1px; }
+}
+.gfw-sonar {
+  position:absolute;pointer-events:none;z-index:600;
+  border:1px solid #cc0000;border-radius:0;
+  transform:translate(-50%,-50%);
+  animation:sonarPing 1s ease-out forwards;
+}
+/* GFW blinking cursor */
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+.gfw-cursor { display:inline-block;width:6px;height:12px;background:#cc0000;margin-left:4px;vertical-align:middle;animation:blink 0.8s step-end infinite; }
 
 /* ===== DRAG ROUTE PREVIEW ===== */
 #dragOverlay {
   position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-  z-index: 1002; background: rgba(15, 23, 42, 0.95); color: #e2e8f0;
-  border-radius: 12px; padding: 14px 20px; min-width: 380px;
-  backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,0.1);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5); display: none;
-  font-size: 12px;
+  z-index: 1002; background: #0a0a0a; color: #888888;
+  border-radius: 0; padding: 14px 20px; min-width: 380px;
+  border: 1px solid #1a1a1a; display: none;
+  font-size: 10px; font-family: Helvetica, Arial, sans-serif;
 }
 #dragOverlay.show { display: block; }
-.drag-title { font-size: 14px; font-weight: 700; color: #fbbf24; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.drag-title { font-size: 10px; font-weight: 400; color: #cc0000; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; letter-spacing: 2px; text-transform: uppercase; }
 .drag-compare { display: grid; grid-template-columns: 1fr auto 1fr; gap: 4px; }
 .drag-col { text-align: center; }
-.drag-col-header { font-size: 9px; text-transform: uppercase; color: #64748b; margin-bottom: 4px; letter-spacing: 0.5px; }
-.drag-metric { background: rgba(0,0,0,0.25); border-radius: 6px; padding: 5px 8px; margin-bottom: 3px; }
-.drag-metric-label { font-size: 9px; color: #64748b; text-transform: uppercase; }
-.drag-metric-value { font-size: 14px; font-weight: 700; }
-.drag-arrow { display: flex; align-items: center; font-size: 18px; color: #64748b; padding-top: 14px; }
-.drag-better { color: #4ade80; }
-.drag-worse { color: #f87171; }
-.drag-neutral { color: #94a3b8; }
+.drag-col-header { font-size: 8px; text-transform: uppercase; color: #444444; margin-bottom: 4px; letter-spacing: 2px; }
+.drag-metric { background: none; border-radius: 0; padding: 4px 8px; margin-bottom: 3px; border-bottom: 1px solid #111111; }
+.drag-metric-label { font-size: 8px; color: #444444; text-transform: uppercase; letter-spacing: 2px; }
+.drag-metric-value { font-size: 12px; font-weight: 300; color: #ffffff; }
+.drag-arrow { display: flex; align-items: center; font-size: 14px; color: #333333; padding-top: 14px; }
+.drag-better { color: #ffffff; }
+.drag-worse { color: #cc0000; }
+.drag-neutral { color: #444444; }
 .drag-actions { display: flex; gap: 6px; margin-top: 8px; justify-content: center; }
-.drag-actions .btn { padding: 6px 18px; font-size: 12px; }
+.drag-actions .btn { padding: 5px 16px; font-size: 9px; }
 
 /* Ship dragging state */
 .ship-dragging { cursor: grabbing !important; }
-.leaflet-marker-icon { cursor: grab; }
+.leaflet-marker-icon { cursor: pointer; }
 .drag-route-preview { pointer-events: none; }
 
 /* ===== DATABASE STATS PANEL ===== */
 #dbStatsPanel {
   position: absolute; top: 12px; left: 12px; z-index: 1000;
-  background: rgba(15, 23, 42, 0.94); color: #e2e8f0;
-  border-radius: 12px; padding: 12px 14px; width: 260px;
-  backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,0.08);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.4); font-size: 12px;
+  background: #0a0a0a; color: #888888;
+  border-radius: 0; padding: 12px 14px; width: 260px;
+  border: 1px solid #1a1a1a; font-size: 10px;
   max-height: calc(100vh - 24px); overflow-y: auto;
-  scrollbar-width: thin; scrollbar-color: #334155 transparent;
-  display: none;
+  scrollbar-width: thin; scrollbar-color: #222222 transparent;
+  display: none; font-family: Helvetica, Arial, sans-serif;
 }
 #dbStatsPanel.show { display: block; }
-#dbStatsPanel h3 { font-size: 13px; color: #22d3ee; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
-.db-section { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-.db-section h4 { font-size: 9px; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px; margin-bottom: 5px; }
-.db-row { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; font-size: 11px; }
-.db-row-label { color: #94a3b8; }
-.db-row-value { font-weight: 600; color: #e2e8f0; }
-.db-row-value.positive { color: #4ade80; }
-.db-row-value.negative { color: #f87171; }
-.db-highlight { background: rgba(0,0,0,0.2); border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; }
-.db-highlight-val { font-size: 20px; font-weight: 700; color: #22d3ee; }
-.db-highlight-lbl { font-size: 9px; color: #64748b; text-transform: uppercase; }
-.db-ship-row { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 10px; }
-.db-ship-row:hover { background: rgba(255,255,255,0.05); }
-.db-ship-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-.db-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; animation: dbPulse 2s infinite; }
-@keyframes dbPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+#dbStatsPanel h3 { font-size: 8px; color: #cc0000; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; letter-spacing: 3px; text-transform: uppercase; font-weight: 400; }
+.db-section { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #1a1a1a; }
+.db-section h4 { font-size: 8px; text-transform: uppercase; color: #444444; letter-spacing: 2px; margin-bottom: 5px; font-weight: 400; }
+.db-row { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; font-size: 10px; }
+.db-row-label { color: #444444; }
+.db-row-value { font-weight: 400; color: #ffffff; font-family: Helvetica, Arial, sans-serif; }
+.db-row-value.positive { color: #ffffff; }
+.db-row-value.negative { color: #cc0000; }
+.db-highlight { background: none; border-radius: 0; padding: 8px 0; margin-bottom: 6px; border-bottom: 1px solid #1a1a1a; }
+.db-highlight-val { font-size: 18px; font-weight: 300; color: #ffffff; font-family: Helvetica, Arial, sans-serif; }
+.db-highlight-lbl { font-size: 8px; color: #444444; text-transform: uppercase; letter-spacing: 2px; }
+.db-ship-row { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 0; cursor: pointer; font-size: 9px; }
+.db-ship-row:hover { background: rgba(204,0,0,0.05); }
+.db-ship-dot { width: 4px; height: 4px; border-radius: 0; flex-shrink: 0; }
+.db-indicator { display: inline-block; width: 4px; height: 4px; border-radius: 0; margin-right: 4px; background: #cc0000 !important; animation: dbPulse 2s infinite; }
+@keyframes dbPulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
 
 .db-chart-mini { height: 80px; margin-top: 4px; }
 
+/* ===== STATUS BAR ===== */
+#statusBar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 999;
+  background: #080808; border-top: 1px solid #1a1a1a;
+  padding: 4px 16px; font-size: 8px; color: #444444;
+  letter-spacing: 2px; text-transform: uppercase;
+  font-family: Helvetica, Arial, sans-serif;
+  display: flex; gap: 16px;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
-  #controls { width: 240px; font-size: 11px; }
+  #controls { width: 200px; font-size: 9px; }
   #shipPanel, #portPanel { width: calc(100% - 12px); }
   #analyticsPanel { width: calc(100% - 24px); }
   #dbStatsPanel { display: none !important; }
-  #dragOverlay { min-width: 280px; font-size: 11px; }
+  #dragOverlay { min-width: 280px; font-size: 9px; }
 }
+
+/* Leaflet overrides for dark theme */
+.leaflet-control-zoom a { background: #0a0a0a !important; color: #444444 !important; border: 1px solid #1a1a1a !important; border-radius: 0 !important; }
+.leaflet-control-zoom a:hover { color: #cc0000 !important; }
+.leaflet-control-attribution { background: rgba(10,10,10,0.8) !important; color: #333333 !important; font-size: 7px !important; }
+.leaflet-control-attribution a { color: #444444 !important; }
+.leaflet-tooltip { background: #0a0a0a !important; border: 1px solid #1a1a1a !important; border-radius: 0 !important; color: #888888 !important; font-family: Helvetica, Arial, sans-serif !important; font-size: 9px !important; letter-spacing: 1px !important; text-transform: uppercase !important; }
+.leaflet-tooltip-top:before { border-top-color: #1a1a1a !important; }
 </style>
 </head>
 <body>
@@ -283,7 +381,8 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
 
 <!-- ===== CONTROL PANEL ===== -->
 <div id="controls">
-  <h2>Malacca Strait Traffic</h2>
+  <h2>MALACCA STRAIT</h2>
+  <div class="ctrl-subtitle">TRAFFIC CONTROL SYS</div>
   <div class="stats">
     <div class="stat-item"><div class="stat-val" id="vesselCount">0</div><div class="stat-lbl">Vessels</div></div>
     <div class="stat-item"><div class="stat-val" id="simTime">00:00</div><div class="stat-lbl">Sim Time</div></div>
@@ -295,19 +394,19 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
   <div class="ctrl-group" style="margin-top:10px">
     <label>Simulation</label>
     <div class="btn-row">
-      <button class="btn active" id="btnPlay" onclick="togglePlay()">&#9654; Play</button>
-      <button class="btn" onclick="stepOnce()">&#9654;| Step</button>
-      <button class="btn danger" onclick="resetSim()">&#8635; Reset</button>
+      <button class="btn active" id="btnPlay" onclick="togglePlay()">PLAY</button>
+      <button class="btn" onclick="stepOnce()">STEP</button>
+      <button class="btn" onclick="resetSim()">RST</button>
     </div>
   </div>
   <div class="ctrl-group">
-    <label>Speed: <span id="speedLabel">5x</span></label>
+    <label>SPEED // <span id="speedLabel">5X</span></label>
     <input type="range" id="speedSlider" min="1" max="50" value="5" oninput="setSpeed(this.value)">
   </div>
   <div class="ctrl-group">
     <div class="btn-row">
-      <button class="btn success" onclick="addRandomVessel()">+ Vessel</button>
-      <button class="btn danger" onclick="removeLastVessel()">- Remove</button>
+      <button class="btn" onclick="addRandomVessel()">+ADD</button>
+      <button class="btn" onclick="removeLastVessel()">-RMV</button>
     </div>
   </div>
 
@@ -315,14 +414,15 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
   <div class="ctrl-group">
     <label>Display</label>
     <div class="btn-row">
-      <button class="btn" id="btnNight" onclick="toggleNight()">&#9790; Night</button>
-      <button class="btn" id="btnTrails" onclick="toggleTrails()">&#8766; Trails</button>
-      <button class="btn" id="btnRoutes" onclick="toggleRoutes()">&#10138; Routes</button>
-      <button class="btn" id="btnHeat" onclick="toggleHeatmap()">&#9632; Heat</button>
-      <button class="btn" id="btnDB" onclick="toggleDBPanel()">&#9107; DB</button>
-      <button class="btn" id="btnDrag" onclick="toggleDragMode()">&#9995; Drag</button>
-      <button class="btn" id="btnHand" onclick="toggleHandMode()">&#9995; Hand Mode</button>
-      <button class="btn" id="btnEasyHands" onclick="toggleEasyHands()">&#127919; EasyHands</button>
+      <button class="btn" id="btnNight" onclick="toggleNight()">NGT</button>
+      <button class="btn" id="btnTrails" onclick="toggleTrails()">TRL</button>
+      <button class="btn" id="btnRoutes" onclick="toggleRoutes()">RTE</button>
+      <button class="btn" id="btnHeat" onclick="toggleHeatmap()">HT</button>
+      <button class="btn" id="btnGFW" onclick="toggleGFW()">GFW</button>
+      <button class="btn" id="btnDB" onclick="toggleDBPanel()">DB</button>
+      <button class="btn" id="btnDrag" onclick="toggleDragMode()">DRG</button>
+      <button class="btn" id="btnHand" onclick="toggleHandMode()">HAND</button>
+      <button class="btn" id="btnEasyHands" onclick="toggleEasyHands()">ESYHD</button>
     </div>
   </div>
 
@@ -360,7 +460,7 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
     <div class="filter-row">
       <input type="text" id="searchVessel" placeholder="Search name/IMO..." oninput="applyFilters()">
     </div>
-    <div id="filterResults" style="font-size:10px;color:#64748b;margin-top:2px;"></div>
+    <div id="filterResults" style="font-size:10px;color:#444444;margin-top:2px;"></div>
   </div>
 
   <!-- Environmental Tab -->
@@ -372,7 +472,7 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
       <div class="sp-field"><div class="sp-field-label">Fuel Used</div><div class="sp-field-value" id="envFuel">0 t</div></div>
     </div>
     <div style="margin-top:8px">
-      <h4 style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px">Fuel by Type</h4>
+      <h4 style="font-size:8px;color:#444444;text-transform:uppercase;margin-bottom:4px;letter-spacing:2px;font-weight:400">Fuel by Type</h4>
       <div id="envFuelBreakdown"></div>
     </div>
   </div>
@@ -385,7 +485,7 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
       <div class="sp-field"><div class="sp-field-label">Oil/Fuel</div><div class="sp-field-value" id="econOil">0 bbl</div></div>
     </div>
     <div style="margin-top:8px">
-      <h4 style="font-size:10px;color:#64748b;text-transform:uppercase;margin-bottom:4px">Top Corridors</h4>
+      <h4 style="font-size:8px;color:#444444;text-transform:uppercase;margin-bottom:4px;letter-spacing:2px;font-weight:400">Top Corridors</h4>
       <div id="econCorridors"></div>
     </div>
   </div>
@@ -393,14 +493,14 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
   <!-- Export Tab -->
   <div class="tab-content" id="tab-export">
     <div class="btn-row" style="margin-bottom:6px">
-      <button class="btn" onclick="exportJSON()">Export JSON</button>
-      <button class="btn" onclick="exportCSV()">Export CSV</button>
+      <button class="btn" onclick="exportJSON()">JSON</button>
+      <button class="btn" onclick="exportCSV()">CSV</button>
     </div>
     <div class="btn-row">
-      <button class="btn success" onclick="saveState()">Save State</button>
-      <button class="btn" onclick="loadState()">Load State</button>
+      <button class="btn" onclick="saveState()">SAVE</button>
+      <button class="btn" onclick="loadState()">LOAD</button>
     </div>
-    <div id="exportStatus" style="font-size:10px;color:#4ade80;margin-top:6px;"></div>
+    <div id="exportStatus" style="font-size:9px;color:#cc0000;margin-top:6px;letter-spacing:1px"></div>
   </div>
 
   <!-- Legend -->
@@ -412,6 +512,18 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
       <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>Cargo</div>
       <div class="legend-item"><div class="legend-dot" style="background:#a855f7"></div>Bulk</div>
       <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>LNG</div>
+    </div>
+  </div>
+
+  <!-- GFW Vessel Results (populated on map click when GFW active) -->
+  <div id="vessel-results" style="display:none">
+    <div class="vr-header">
+      <span class="vr-title">VESSELS AT LOCATION</span>
+      <button class="vr-clear" onclick="clearVesselResults()">CLEAR</button>
+    </div>
+    <div class="vr-coords" id="vrCoords"></div>
+    <div class="vr-body" id="vrBody">
+      <div class="vr-empty">Click map with GFW active to query vessels</div>
     </div>
   </div>
 </div>
@@ -472,7 +584,7 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
     </div>
     <div style="margin-top:8px">
       <div class="sp-field-label">Load Factor</div>
-      <div class="sp-cargo-bar"><div class="sp-cargo-fill" id="spLoadBar" style="width:0;background:#38bdf8"></div></div>
+      <div class="sp-cargo-bar"><div class="sp-cargo-fill" id="spLoadBar" style="width:0;background:#cc0000"></div></div>
     </div>
     <div class="sp-chart-container" style="height:100px;margin-top:8px"><canvas id="spCargoChart"></canvas></div>
   </div>
@@ -557,9 +669,9 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
 
 <!-- ===== ANALYTICS PANEL ===== -->
 <div id="analyticsPanel">
-  <button class="ap-toggle" onclick="toggleAnalytics()">&#9650; Analytics Dashboard</button>
+  <button class="ap-toggle" onclick="toggleAnalytics()">ANALYTICS</button>
   <div class="ap-header">
-    <h3>Real-Time Analytics</h3>
+    <h3>REAL-TIME ANALYTICS</h3>
     <button class="sp-close" onclick="toggleAnalytics()" style="position:static;font-size:16px">&times;</button>
   </div>
   <div class="ap-body">
@@ -584,7 +696,7 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
 
 <!-- ===== DRAG ROUTE PREVIEW OVERLAY ===== -->
 <div id="dragOverlay">
-  <div class="drag-title">&#9875; Route Change Preview</div>
+  <div class="drag-title">ROUTE CHANGE PREVIEW</div>
   <div class="drag-compare">
     <div class="drag-col">
       <div class="drag-col-header">Current Route</div>
@@ -606,18 +718,18 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
     <div class="drag-metric"><div class="drag-metric-label">Net Impact</div><div class="drag-metric-value" id="dragNetImpact">--</div></div>
   </div>
   <div class="drag-actions">
-    <button class="btn success" onclick="confirmDrag()">&#10003; Confirm Route</button>
-    <button class="btn danger" onclick="cancelDrag()">&#10007; Cancel</button>
+    <button class="btn" onclick="confirmDrag()">CONFIRM</button>
+    <button class="btn" onclick="cancelDrag()">CANCEL</button>
   </div>
 </div>
 
 <!-- ===== DATABASE STATS PANEL ===== -->
 <div id="dbStatsPanel">
-  <h3><span class="db-indicator" style="background:#4ade80"></span> Live Trade Database</h3>
+  <h3><span class="db-indicator"></span> LIVE TRADE DATABASE</h3>
   <div class="db-section">
     <div class="db-highlight" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
       <div><div class="db-highlight-val" id="dbTotalRev">$0</div><div class="db-highlight-lbl">Total Revenue</div></div>
-      <div><div class="db-highlight-val" id="dbTotalProfit" style="color:#4ade80">$0</div><div class="db-highlight-lbl">Net Profit</div></div>
+      <div><div class="db-highlight-val" id="dbTotalProfit">$0</div><div class="db-highlight-lbl">Net Profit</div></div>
     </div>
   </div>
   <div class="db-section">
@@ -647,7 +759,7 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
     <div id="dbEvents" style="max-height:120px;overflow-y:auto"></div>
   </div>
   <div style="margin-top:6px">
-    <button class="btn" onclick="exportDBData()" style="width:100%">Export Database (JSON)</button>
+    <button class="btn" onclick="exportDBData()" style="width:100%">EXPORT DB</button>
   </div>
 </div>
 
@@ -658,8 +770,18 @@ body.night-mode #map { filter: brightness(0.65) contrast(1.15) saturate(0.7); }
   <div style="display:flex;justify-content:space-between"><span>Low</span><span>High</span></div>
 </div>
 
+<!-- GFW bottom panel removed — results now shown in right-side control panel -->
+
 <!-- Collision warning -->
-<div class="collision-warning" id="collisionWarning">&#9888; COLLISION WARNING - Vessels in close proximity!</div>
+<div class="collision-warning" id="collisionWarning">! COLLISION WARNING -- VESSELS IN CLOSE PROXIMITY</div>
+
+<!-- Status bar -->
+<div id="statusBar">
+  <span id="sbTick">SIM TICK 0000</span>
+  <span>// LAYER I //</span>
+  <span id="sbVessels">VESSELS 0</span>
+  <span id="sbFlow">// MALACCA FLOW 0%</span>
+</div>
 
 <!-- Hand tracking elements -->
 <video id="handVideo" autoplay playsinline style="display:none;"></video>
@@ -750,13 +872,17 @@ const WAYPOINT_NAMES = [
 // ================================================================
 const map = L.map('map', { center: [2.5, 101.5], zoom: 7, minZoom: 5, maxZoom: 14, zoomControl: false });
 L.control.zoom({ position: 'bottomright' }).addTo(map);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', { attribution: '&copy; OpenStreetMap &copy; CARTO' }).addTo(map);
+map.createPane('labelsPane');
+map.getPane('labelsPane').style.zIndex = 650;
+map.getPane('labelsPane').style.pointerEvents = 'none';
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { pane: 'labelsPane' }).addTo(map);
 
 // Shipping lane overlays
 const tssNW = [[1.17,103.85],[1.25,103.65],[1.60,103.30],[2.00,102.60],[2.40,101.90],[2.80,101.20],[3.30,100.50],[3.80,100.00],[4.20,99.50],[4.80,98.50],[5.40,97.80],[5.80,97.20]];
 const tssSE = [[1.10,103.80],[1.18,103.60],[1.52,103.25],[1.92,102.55],[2.32,101.85],[2.72,101.15],[3.22,100.45],[3.72,99.95],[4.12,99.45],[4.72,98.45],[5.32,97.75],[5.72,97.15]];
-let routeLayerNW = L.polyline(tssNW, { color: '#22d3ee', weight: 1.5, opacity: 0.4, dashArray: '8,6' }).addTo(map);
-let routeLayerSE = L.polyline(tssSE, { color: '#fb923c', weight: 1.5, opacity: 0.4, dashArray: '8,6' }).addTo(map);
+let routeLayerNW = L.polyline(tssNW, { color: '#cc0000', weight: 1, opacity: 0.3, dashArray: '6,4' }).addTo(map);
+let routeLayerSE = L.polyline(tssSE, { color: '#444444', weight: 1, opacity: 0.3, dashArray: '6,4' }).addTo(map);
 let routesVisible = true;
 
 // ================================================================
@@ -799,7 +925,7 @@ const ports = [
 
 let portMarkers = [];
 ports.forEach((p, idx) => {
-  const m = L.circleMarker([p.lat, p.lng], { radius: 7, fillColor: '#fbbf24', color: '#fff', weight: 2, fillOpacity: 0.9 })
+  const m = L.circleMarker([p.lat, p.lng], { radius: 4, fillColor: '#cc0000', color: '#cc0000', weight: 1, fillOpacity: 0.6 })
     .bindTooltip(p.name, { permanent: false, direction: 'top' })
     .addTo(map);
   m.on('click', () => openPortPanel(idx));
@@ -914,10 +1040,11 @@ function createVessel(opts = {}) {
   const pos = positionOnRoute(route, progress);
   const markerSize = Math.max(8, Math.min(14, sizeMeter / 25));
 
+  const _pulseDelay = vesselId * 137;
   const icon = L.divIcon({
     className: '',
-    html: `<div style="width:${markerSize}px;height:${markerSize*2.2}px;background:${cfg.color};border:1.5px solid #fff;border-radius:50% 50% 30% 30%;transform:rotate(${pos.bearing}deg);box-shadow:0 0 6px ${cfg.color}88;transition:transform 0.3s;" id="ship-icon-${vesselId}"></div>`,
-    iconSize: [markerSize, markerSize*2.2], iconAnchor: [markerSize/2, markerSize*1.1]
+    html: `<div class="vessel-cross" id="ship-icon-${vesselId}" style="animation-delay:${_pulseDelay}ms"><div class="cross-h" style="animation-delay:${_pulseDelay}ms"></div><div class="cross-v" style="animation-delay:${_pulseDelay}ms"></div><div class="vessel-datacard"><div class="vdc-name">${name}</div><div class="vdc-type">${cfg.label} // ${typeof flag === 'object' ? flag.code : flag}</div><div class="vdc-speed">${speed.toFixed(1)} KN // ${Math.round(pos.bearing)}°</div><div class="vdc-imo">IMO: ${imo}</div></div></div>`,
+    iconSize: [12, 12], iconAnchor: [6, 6]
   });
 
   const marker = L.marker([pos.lat, pos.lng], { icon, zIndexOffset: 500 }).addTo(map);
@@ -960,25 +1087,25 @@ function createVessel(opts = {}) {
 // ================================================================
 //  SIMULATION ENGINE
 // ================================================================
-let playing = true, simSpeed = 5, simElapsed = 0, warningCount = 0;
+let playing = true, simSpeed = 5, simElapsed = 0, warningCount = 0, simTickCount = 0;
 const COLLISION_DIST_NM = 1.5;
 
 function togglePlay() {
   playing = !playing;
   const btn = document.getElementById('btnPlay');
-  btn.innerHTML = playing ? '&#9654; Play' : '&#9646;&#9646; Pause';
+  btn.textContent = playing ? 'PLAY' : 'PAUSE';
   btn.classList.toggle('active', playing);
 }
 function stepOnce() {
-  if(playing){ playing=false; document.getElementById('btnPlay').innerHTML='&#9646;&#9646; Pause'; document.getElementById('btnPlay').classList.remove('active'); }
+  if(playing){ playing=false; document.getElementById('btnPlay').textContent='PAUSE'; document.getElementById('btnPlay').classList.remove('active'); }
   updateSim(1/60);
 }
-function setSpeed(val) { simSpeed=parseInt(val); document.getElementById('speedLabel').textContent=simSpeed+'x'; }
+function setSpeed(val) { simSpeed=parseInt(val); document.getElementById('speedLabel').textContent=simSpeed+'X'; }
 
 function resetSim() {
   vessels.forEach(v => map.removeLayer(v.marker));
   trailLines.forEach(l => map.removeLayer(l));
-  trailLines = []; vessels = []; vesselId = 0; simElapsed = 0; warningCount = 0;
+  trailLines = []; vessels = []; vesselId = 0; simElapsed = 0; warningCount = 0; simTickCount = 0;
   throughputHistory = []; densityHistory = [];
   portProcessed = {};
   // Reset DB counters
@@ -1012,6 +1139,7 @@ function updateSim(dtReal) {
   const dtSim = dtReal * simSpeed;
   const dtHours = dtSim / 60;
   simElapsed += dtSim;
+  simTickCount++;
 
   let activeWarnings = 0;
   const heatPoints = [];
@@ -1080,7 +1208,10 @@ function updateSim(dtReal) {
     heatPoints.push([pos.lat, pos.lng, 0.6]);
 
     const el = document.getElementById('ship-icon-' + v.id);
-    if (el) el.style.transform = `rotate(${pos.bearing}deg)`;
+    if (el) {
+      const spdEl = el.querySelector('.vdc-speed');
+      if (spdEl) spdEl.textContent = v.speed.toFixed(1) + ' KN // ' + Math.round(pos.bearing) + '\u00B0';
+    }
 
     if (showTrails) {
       v.trail.push([pos.lat, pos.lng]);
@@ -1103,7 +1234,7 @@ function updateSim(dtReal) {
     trailLines.forEach(l => map.removeLayer(l));
     trailLines = [];
     vessels.forEach(v => {
-      if(v.trail.length > 1) trailLines.push(L.polyline(v.trail, { color: v.color, weight: 1.5, opacity: 0.5 }).addTo(map));
+      if(v.trail.length > 1) trailLines.push(L.polyline(v.trail, { color: '#cc0000', weight: 1, opacity: 0.3 }).addTo(map));
     });
   }
 
@@ -1144,6 +1275,14 @@ function updateStats() {
     document.getElementById('avgSpeed').textContent = (vessels.reduce((s,v)=>s+v.speed,0)/vessels.length).toFixed(1);
   } else document.getElementById('avgSpeed').textContent = '0';
   document.getElementById('warnings').textContent = warningCount;
+  // Status bar update
+  var sbTick = document.getElementById('sbTick');
+  var sbVessels = document.getElementById('sbVessels');
+  var sbFlow = document.getElementById('sbFlow');
+  if (sbTick) sbTick.textContent = 'SIM TICK ' + String(simTickCount).padStart(4, '0');
+  if (sbVessels) sbVessels.textContent = 'VESSELS ' + vessels.length;
+  var flowPct = vessels.length ? Math.min(100, Math.round((vessels.reduce(function(s,v){return s+v.speed;},0) / vessels.length / 15) * 100)) : 0;
+  if (sbFlow) sbFlow.textContent = '// MALACCA FLOW ' + flowPct + '%';
 }
 
 function updateEnvTab() {
@@ -1165,7 +1304,7 @@ function updateEnvTab() {
   fbDiv.innerHTML = Object.entries(totals.byFuel).sort((a,b)=>b[1]-a[1]).map(([f,v]) =>
     `<div class="pp-commodity-bar">
       <div class="pp-commodity-label">${f}</div>
-      <div class="pp-commodity-fill" style="width:${(v/maxFuel)*100}px;background:#38bdf8"></div>
+      <div class="pp-commodity-fill" style="width:${(v/maxFuel)*100}px;background:#cc0000"></div>
       <div class="pp-commodity-val">${fmtNum(v)}t</div>
     </div>`
   ).join('');
@@ -1241,19 +1380,363 @@ function updateHeatmap(points) {
 }
 
 // ================================================================
+//  GLOBAL FISHING WATCH — 4Wings Vessel Density Layer
+// ================================================================
+console.log('[GFW] Initializing GFW module...');
+map.createPane('gfwPane');
+map.getPane('gfwPane').style.zIndex = 250;
+map.getPane('gfwPane').style.mixBlendMode = 'screen';
+map.getPane('gfwPane').style.filter = 'saturate(1.4) contrast(1.2)';
+console.log('[GFW] Pane created: zIndex=250, blendMode=screen, filter=saturate+contrast');
+
+const GFW_TOKEN = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtpZEtleSJ9.eyJkYXRhIjp7Im5hbWUiOiJEZWVwIHdhdGVycyIsInVzZXJJZCI6NTY5OTcsImFwcGxpY2F0aW9uTmFtZSI6IkRlZXAgd2F0ZXJzIiwiaWQiOjQ3MTUsInR5cGUiOiJ1c2VyLWFwcGxpY2F0aW9uIn0sImlhdCI6MTc3MjU4NDQ2NywiZXhwIjoyMDg3OTQ0NDY3LCJhdWQiOiJnZnciLCJpc3MiOiJnZncifQ.XYKlF1r1eWD8IREjOmpiRqHcQ2WY3OC4rBI-r3LZ7mxZIqyeun89K50M-9CLAYOWqXmfIH8xXQEkv_Pf8Iv5Y0cRRcPU2bR7SrSa-u5eRm-LfuSFY64dH3NJFz20pdqb8qJPOAWnIPB2nkVUV2DbIkCmCX-L4BmINbNnnb3DPu9Oo_K_tv-RWOtGrAXNokHEW5A4gjTqz4xlYgVoiOu-cIUQ77hBlP6eLrwxNm44mYHw1NpgcnwpgpaP3pe79BUAs79oe3lghWWH9OwxI3btwcJjXBpzdcEk_yQHj8lH56lhQMxv6o8liGKPTDTBkab3gmX6D9lRdozVClFoF1Io0XRWHazo15WRf3EwpvqRsgZGWpq9iia-OPKQ65j02Ge0MDR-Nzs_15gx-kCa07Da2EMVddm_sFNhHyxq2OhmFilizw5Zr3xiLS-3z0wHBrPrTViiM2iWfYgSteScWY6xWIact0XaLkfMuZXMSs1fCpnw8FQPfRf_-AHrJtPi-LJ4';
+const GFW_STYLE = btoa(JSON.stringify({color:[255,255,255],ramp:[0,387165,1458717,3241694,6662649,12854780,19905449,28902107,65228914]}));
+
+// HSL→RGB helper (h 0-360, s/l 0-1)
+function _hsl(h, s, l) {
+  var c = (1 - Math.abs(2 * l - 1)) * s;
+  var x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  var m = l - c / 2;
+  var r, g, b;
+  if (h < 60)       { r = c; g = x; b = 0; }
+  else if (h < 120) { r = x; g = c; b = 0; }
+  else if (h < 180) { r = 0; g = c; b = x; }
+  else if (h < 240) { r = 0; g = x; b = c; }
+  else if (h < 300) { r = x; g = 0; b = c; }
+  else              { r = c; g = 0; b = x; }
+  return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+}
+// Precompute lookup table: source alpha (0-255) → [r, g, b, a]
+var _gfwLUT = new Array(256);
+(function() {
+  // Stop 1: hsl(285, 100%, 55%) @ opacity 0.5  (alpha 1–40)
+  var c1 = _hsl(285, 1.0, 0.55);  // soft purple
+  // Stop 2: hsl(45, 100%, 55%) @ opacity 0.75  (alpha 41–120)
+  var c2 = _hsl(45, 1.0, 0.55);   // warm yellow
+  // Stop 3: hsl(0, 0%, 100%) @ opacity 1.0  (alpha 121–255)
+  var c3 = [255, 255, 255];        // white hot
+  _gfwLUT[0] = null;
+  for (var a = 1; a <= 255; a++) {
+    var r, g, b, oa;
+    if (a <= 40) {
+      // Interpolate within purple band, fading in from transparent
+      var t = (a - 1) / 39;  // 0 → 1
+      r = c1[0]; g = c1[1]; b = c1[2];
+      oa = (0.15 + t * 0.35) * 255;  // 0.15 → 0.5
+    } else if (a <= 120) {
+      // Smooth purple → yellow
+      var t = (a - 41) / 79;  // 0 → 1
+      r = c1[0] + (c2[0] - c1[0]) * t;
+      g = c1[1] + (c2[1] - c1[1]) * t;
+      b = c1[2] + (c2[2] - c1[2]) * t;
+      oa = (0.5 + t * 0.25) * 255;   // 0.5 → 0.75
+    } else {
+      // Smooth yellow → white
+      var t = (a - 121) / 134;  // 0 → 1
+      r = c2[0] + (c3[0] - c2[0]) * t;
+      g = c2[1] + (c3[1] - c2[1]) * t;
+      b = c2[2] + (c3[2] - c2[2]) * t;
+      oa = (0.75 + t * 0.25) * 255;  // 0.75 → 1.0
+    }
+    _gfwLUT[a] = [r | 0, g | 0, b | 0, oa | 0];
+  }
+})();
+
+// Recolor GFW tile using precomputed LUT
+function gfwRecolor(ctx, w, h) {
+  var id = ctx.getImageData(0, 0, w, h);
+  var d = id.data;
+  var colored = 0;
+  for (var i = 0; i < d.length; i += 4) {
+    var a = d[i + 3];
+    if (a === 0) continue;
+    colored++;
+    var c = _gfwLUT[a];
+    d[i]     = c[0];
+    d[i + 1] = c[1];
+    d[i + 2] = c[2];
+    d[i + 3] = c[3];
+  }
+  ctx.putImageData(id, 0, 0);
+  return colored;
+}
+
+let _gfwTileCount = 0;
+const GFWLayer = L.GridLayer.extend({
+  createTile: function(coords, done) {
+    const tileId = ++_gfwTileCount;
+    const canvas = document.createElement('canvas');
+    const size = this.getTileSize();
+    canvas.width = size.x;
+    canvas.height = size.y;
+    const url = 'https://gateway.api.globalfishingwatch.org/v3/4wings/tile/heatmap/'
+      + coords.z + '/' + coords.x + '/' + coords.y
+      + '?format=PNG&interval=MONTH'
+      + '&datasets[0]=public-global-presence:v4.0'
+      + '&date-range=2024-01-01,2024-12-31'
+      + '&style=' + GFW_STYLE;
+    console.log('[GFW] Tile #' + tileId + ' fetching z=' + coords.z + ' x=' + coords.x + ' y=' + coords.y);
+    fetch(url, { headers: { 'Authorization': 'Bearer ' + GFW_TOKEN } })
+      .then(function(res) {
+        console.log('[GFW] Tile #' + tileId + ' response: ' + res.status + ' ' + res.headers.get('content-type'));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.blob();
+      })
+      .then(function(blob) {
+        console.log('[GFW] Tile #' + tileId + ' blob size: ' + blob.size + ' bytes');
+        var img = new Image();
+        img.onload = function() {
+          var ctx = canvas.getContext('2d');
+          ctx.filter = 'blur(0.8px)';
+          ctx.drawImage(img, 0, 0, size.x, size.y);
+          ctx.filter = 'none';
+          URL.revokeObjectURL(img.src);
+          var px = gfwRecolor(ctx, size.x, size.y);
+          console.log('[GFW] Tile #' + tileId + ' rendered, ' + px + ' colored pixels');
+          done(null, canvas);
+        };
+        img.onerror = function() {
+          console.warn('[GFW] Tile #' + tileId + ' image decode failed');
+          URL.revokeObjectURL(img.src);
+          done(null, canvas);
+        };
+        img.src = URL.createObjectURL(blob);
+      })
+      .catch(function(err) {
+        console.error('[GFW] Tile #' + tileId + ' fetch error:', err.message || err);
+        done(null, canvas);
+      });
+    return canvas;
+  }
+});
+console.log('[GFW] GFWLayer class defined');
+
+let gfwLayer = null, gfwVisible = false;
+
+// --- GFW Vessel Registry: click-to-query ---
+var _gfwVesselTypeColors = {
+  FISHING:'#cc0000', CARRIER:'#888888', CARGO:'#666666', TANKER:'#cc0000',
+  TUG:'#555555', PASSENGER:'#777777', OTHER:'#444444', BUNKER:'#555555',
+  SPECIALIZED:'#999999', SEISMIC_VESSEL:'#666666'
+};
+
+function _gfwSonarPing(latlng) {
+  var pt = map.latLngToContainerPoint(latlng);
+  var el = document.createElement('div');
+  el.className = 'gfw-sonar';
+  el.style.left = pt.x + 'px';
+  el.style.top = pt.y + 'px';
+  map.getContainer().appendChild(el);
+  setTimeout(function() { el.remove(); }, 1100);
+}
+
+function closeGFWPanel() {
+  clearVesselResults();
+}
+
+function clearVesselResults() {
+  var vr = document.getElementById('vessel-results');
+  if (vr) vr.style.display = 'none';
+  var body = document.getElementById('vrBody');
+  if (body) body.innerHTML = '<div class="vr-empty">Click map with GFW active to query vessels</div>';
+  var coords = document.getElementById('vrCoords');
+  if (coords) coords.textContent = '';
+}
+
+function _gfwShowPanel(lat, lng, html) {
+  var vr = document.getElementById('vessel-results');
+  if (vr) vr.style.display = 'block';
+  var coords = document.getElementById('vrCoords');
+  if (coords) coords.textContent = lat.toFixed(3) + ', ' + lng.toFixed(3);
+  var body = document.getElementById('vrBody');
+  if (body) body.innerHTML = html;
+}
+
+// Find nearby simulated vessels within a radius (in degrees, ~1° ≈ 111km)
+function _gfwNearbySimVessels(lat, lng, radiusDeg) {
+  var nearby = [];
+  vessels.forEach(function(v) {
+    var pos = v.marker.getLatLng();
+    var dlat = pos.lat - lat, dlng = pos.lng - lng;
+    var dist = Math.sqrt(dlat*dlat + dlng*dlng);
+    if (dist <= radiusDeg) {
+      nearby.push({ vessel: v, dist: dist, distNm: dist * 60 });
+    }
+  });
+  nearby.sort(function(a,b) { return a.dist - b.dist; });
+  return nearby;
+}
+
+// Render simulated vessel rows (used as fallback or supplement)
+function _gfwRenderSimVessels(nearbyList, label) {
+  if (!nearbyList.length) return '<div style="color:#444444;font-size:9px;padding:8px 0;letter-spacing:2px">NO VESSELS IN RANGE</div>';
+  var html = '<div style="color:#444444;font-size:8px;text-transform:uppercase;letter-spacing:2px;padding:4px 0 6px;border-bottom:1px solid #1a1a1a">' + label + '</div>';
+  html += nearbyList.slice(0, 12).map(function(n) {
+    var v = n.vessel;
+    return '<div style="display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid #111111">'
+      + '<div style="width:4px;height:4px;background:#cc0000;margin-top:5px;flex-shrink:0"></div>'
+      + '<div style="min-width:0;flex:1">'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline">'
+      + '<span style="font-size:10px;color:#fff;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + v.name + '</span>'
+      + '<span style="font-size:8px;color:#444444;flex-shrink:0;margin-left:8px">' + n.distNm.toFixed(1) + ' NM</span>'
+      + '</div>'
+      + '<div style="font-size:8px;color:#666666;font-family:Helvetica,Arial,sans-serif">' + v.flag.code + ' // ' + v.label + ' // ' + v.speed.toFixed(1) + ' KN</div>'
+      + '<div style="font-size:8px;color:#444444;font-family:Helvetica,Arial,sans-serif">IMO ' + v.imo + ' // MMSI ' + v.mmsi + '</div>'
+      + '<div style="font-size:8px;color:#333333;font-family:Helvetica,Arial,sans-serif">' + v.origin + ' > ' + v.destination + ' // ' + (v.cargo ? v.cargo.type : '') + '</div>'
+      + '</div></div>';
+  }).join('');
+  return html;
+}
+
+function _gfwOnMapClick(e) {
+  if (!gfwVisible) return;
+  var lat = e.latlng.lat, lng = e.latlng.lng;
+  console.log('[GFW] Map click at', lat.toFixed(4), lng.toFixed(4));
+  _gfwSonarPing(e.latlng);
+
+  // Immediately find and show nearby simulated vessels (instant)
+  var nearby = _gfwNearbySimVessels(lat, lng, 0.5);
+  var simHtml = _gfwRenderSimVessels(nearby, 'SIMULATED VESSELS NEARBY (' + nearby.length + ')');
+
+  // Show simulated vessels immediately, then try GFW API in background
+  var startTime = Date.now();
+  _gfwShowPanel(lat, lng,
+    '<div style="margin-bottom:8px"><span style="color:#cc0000;font-size:11px">QUERYING GFW REGISTRY...<span class="gfw-cursor"></span> <span id="gfwTimer" style="color:#444444">0s</span></span></div>'
+    + simHtml
+  );
+
+  // Elapsed timer so user sees activity
+  var timerEl = null;
+  var timerInterval = setInterval(function() {
+    timerEl = timerEl || document.getElementById('gfwTimer');
+    if (timerEl) timerEl.textContent = Math.round((Date.now() - startTime) / 1000) + 's';
+  }, 500);
+
+  // Build bbox ±0.05° (~5.5km) and query 1 month
+  var d = 0.05;
+  var geojson = {type:'Polygon',coordinates:[[[lng-d,lat-d],[lng+d,lat-d],[lng+d,lat+d],[lng-d,lat+d],[lng-d,lat-d]]]};
+  var url = 'https://gateway.api.globalfishingwatch.org/v3/4wings/report'
+    + '?datasets[0]=public-global-presence:v4.0'
+    + '&date-range=2024-11-01,2024-11-30'
+    + '&spatial-resolution=LOW&temporal-resolution=MONTHLY'
+    + '&group-by=VESSEL_ID&format=JSON';
+
+  // AbortController for timeout
+  var controller = new AbortController();
+  var timeoutId = setTimeout(function() { controller.abort(); }, 18000);
+
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + GFW_TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ geojson: geojson }),
+    signal: controller.signal
+  })
+  .then(function(res) {
+    console.log('[GFW] Vessels API response:', res.status);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  })
+  .then(function(data) {
+    clearTimeout(timeoutId);
+    clearInterval(timerInterval);
+    var entries = data.entries || [];
+    var recs = (entries.length && entries[0]) ? (entries[0]['public-global-presence:v4.0'] || []) : [];
+    console.log('[GFW] Raw vessel records:', recs.length);
+    if (!recs.length) {
+      // API returned no records — keep showing simulated vessels
+      _gfwShowPanel(lat, lng,
+        '<div style="color:#444444;font-size:10px;margin-bottom:8px">GFW REGISTRY: No records at this location</div>'
+        + simHtml
+      );
+      return;
+    }
+    // Deduplicate by vesselId, keep highest hours
+    var byId = {};
+    recs.forEach(function(r) {
+      var vid = r.vesselId || r.mmsi;
+      if (!byId[vid] || r.hours > byId[vid].hours) byId[vid] = r;
+    });
+    var unique = Object.values(byId);
+    unique.sort(function(a,b) { return (b.hours||0) - (a.hours||0); });
+    var top10 = unique.slice(0, 10);
+    console.log('[GFW] Showing', top10.length, 'unique GFW vessels');
+    var gfwHtml = '<div style="color:#cc0000;font-size:8px;text-transform:uppercase;letter-spacing:2px;padding:4px 0 6px;border-bottom:1px solid #1a1a1a">GFW REGISTRY // ' + unique.length + ' VESSELS // TOP 10</div>';
+    gfwHtml += top10.map(function(v) {
+      var name = v.shipName || 'UNKNOWN';
+      var flag = v.flag || '\u2014';
+      var vtype = v.vesselType || v.geartype || 'OTHER';
+      var imo = v.imo ? 'IMO ' + v.imo : '';
+      var mmsi = v.mmsi ? 'MMSI ' + v.mmsi : '';
+      var ids = [imo, mmsi].filter(Boolean).join(' // ');
+      var lastTx = v.lastTransmissionDate ? v.lastTransmissionDate.substring(0, 10) : '';
+      var hours = v.hours ? v.hours + 'H' : '';
+      return '<div style="display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid #111111">'
+        + '<div style="width:4px;height:4px;background:#cc0000;margin-top:5px;flex-shrink:0"></div>'
+        + '<div style="min-width:0">'
+        + '<div style="font-size:10px;color:#fff;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + name + '</div>'
+        + '<div style="font-size:8px;color:#666666;font-family:Helvetica,Arial,sans-serif">' + flag + ' // ' + vtype + (hours ? ' // ' + hours : '') + '</div>'
+        + (ids ? '<div style="font-size:8px;color:#444444;font-family:Helvetica,Arial,sans-serif">' + ids + '</div>' : '')
+        + (lastTx ? '<div style="font-size:8px;color:#333333;font-family:Helvetica,Arial,sans-serif">TX ' + lastTx + '</div>' : '')
+        + '</div></div>';
+    }).join('');
+    // Show GFW results + simulated vessels below
+    _gfwShowPanel(lat, lng, gfwHtml + '<div style="margin-top:8px">' + simHtml + '</div>');
+  })
+  .catch(function(err) {
+    clearTimeout(timeoutId);
+    clearInterval(timerInterval);
+    var reason = err.name === 'AbortError' ? 'REQUEST TIMED OUT' : (err.message || 'NETWORK ERROR');
+    console.warn('[GFW] Vessels query failed:', reason);
+    // Show error + simulated vessels (always have something to show)
+    _gfwShowPanel(lat, lng,
+      '<div style="color:#cc0000;font-size:10px;margin-bottom:8px">GFW REGISTRY: ' + reason + '</div>'
+      + simHtml
+    );
+  });
+}
+
+function toggleGFW() {
+  gfwVisible = !gfwVisible;
+  console.log('[GFW] toggleGFW called, visible=' + gfwVisible);
+  document.getElementById('btnGFW').classList.toggle('active', gfwVisible);
+  if (gfwVisible) {
+    gfwLayer = new GFWLayer({ pane: 'gfwPane', opacity: 0.75, tileSize: 256 });
+    gfwLayer.addTo(map);
+    map.on('click', _gfwOnMapClick);
+    console.log('[GFW] Layer + click handler added');
+  } else {
+    if (gfwLayer) { map.removeLayer(gfwLayer); gfwLayer = null; }
+    map.off('click', _gfwOnMapClick);
+    closeGFWPanel();
+    console.log('[GFW] Layer + click handler removed');
+  }
+}
+console.log('[GFW] Module ready');
+
+// ================================================================
 //  PHASE 2: SHIP DETAIL PANEL
 // ================================================================
 let selectedShipId = null;
 let spSpeedChart = null, spCargoChart = null;
 
+function _setShipSelected(id, sel) {
+  var v = vessels.find(function(x) { return x.id === id; });
+  if (!v) return;
+  var el = document.getElementById('ship-icon-' + v.id);
+  if (el) { if (sel) el.classList.add('selected'); else el.classList.remove('selected'); }
+}
+
 function openShipPanel(id) {
+  if (selectedShipId !== null) _setShipSelected(selectedShipId, false);
   selectedShipId = id;
+  _setShipSelected(id, true);
   document.getElementById('shipPanel').classList.add('open');
   document.getElementById('portPanel').classList.remove('open');
   updateShipPanelFull();
 }
 
 function closeShipPanel() {
+  if (selectedShipId !== null) _setShipSelected(selectedShipId, false);
   selectedShipId = null;
   document.getElementById('shipPanel').classList.remove('open');
   if (spSpeedChart) { spSpeedChart.destroy(); spSpeedChart = null; }
@@ -1267,8 +1750,8 @@ function updateShipPanelFull() {
 
   document.getElementById('spName').textContent = v.name;
   document.getElementById('spBadge').textContent = v.label;
-  document.getElementById('spBadge').style.background = colors[v.type];
-  document.getElementById('spImo').textContent = v.imo + ' | ' + v.flag.country + ' (' + v.flag.code + ')';
+  document.getElementById('spBadge').style.background = 'transparent';
+  document.getElementById('spImo').textContent = v.imo + ' // ' + v.flag.country + ' (' + v.flag.code + ')';
 
   // Identity
   document.getElementById('spFlag').textContent = v.flag.country + ' ' + v.flag.code;
@@ -1292,7 +1775,7 @@ function updateShipPanelFull() {
   document.getElementById('spHazmat').className = 'sp-field-value' + (v.cargo.hazmat ? ' hazmat' : '');
   document.getElementById('spCargoClass').textContent = v.cargo.classification;
   document.getElementById('spLoadBar').style.width = (v.loadFactor * 100) + '%';
-  document.getElementById('spLoadBar').style.background = v.loadFactor > 0.9 ? '#ef4444' : v.loadFactor > 0.7 ? '#f59e0b' : '#38bdf8';
+  document.getElementById('spLoadBar').style.background = '#cc0000';
 
   // Route
   document.getElementById('spOrigin').textContent = v.origin;
@@ -1302,7 +1785,7 @@ function updateShipPanelFull() {
   const tl = document.getElementById('spTimeline');
   tl.innerHTML = v.waypoints.map((wp, i) => {
     const cls = v.progress >= wp.progress ? (v.progress > wp.progress + 0.05 ? 'done' : 'active') : '';
-    return `<div class="sp-route-wp ${cls}"><strong>${wp.name}</strong><br><span style="color:#64748b;font-size:10px">${(wp.progress*100).toFixed(0)}% of route</span></div>`;
+    return `<div class="sp-route-wp ${cls}"><strong>${wp.name}</strong><br><span style="color:#444444;font-size:10px">${(wp.progress*100).toFixed(0)}% of route</span></div>`;
   }).join('');
 
   // Create charts
@@ -1348,8 +1831,8 @@ function initShipCharts(v) {
   const ctxSpeed = document.getElementById('spSpeedChart').getContext('2d');
   spSpeedChart = new Chart(ctxSpeed, {
     type: 'line',
-    data: { labels: v.speedHistory.map((_,i)=>i), datasets: [{ data: v.speedHistory, borderColor: '#38bdf8', borderWidth: 1.5, fill: true, backgroundColor: 'rgba(56,189,248,0.1)', pointRadius: 0, tension: 0.3 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: true, ticks: { color: '#64748b', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.05)' } } } }
+    data: { labels: v.speedHistory.map((_,i)=>i), datasets: [{ data: v.speedHistory, borderColor: '#cc0000', borderWidth: 1, fill: false, pointRadius: 0, tension: 0.3 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: true, ticks: { color: '#444444', font: { size: 9 } }, grid: { color: '#111111' } } } }
   });
 
   // Cargo breakdown doughnut
@@ -1358,9 +1841,9 @@ function initShipCharts(v) {
     type: 'doughnut',
     data: {
       labels: ['Loaded (' + (v.loadFactor*100).toFixed(0) + '%)', 'Available'],
-      datasets: [{ data: [v.loadFactor*100, (1-v.loadFactor)*100], backgroundColor: [SHIP_TYPES[v.type].color, 'rgba(255,255,255,0.08)'], borderWidth: 0 }]
+      datasets: [{ data: [v.loadFactor*100, (1-v.loadFactor)*100], backgroundColor: ['#cc0000', '#1a1a1a'], borderWidth: 0 }]
     },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, position: 'right', labels: { color: '#94a3b8', font: { size: 10 }, boxWidth: 10 } } }, cutout: '65%' }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, position: 'right', labels: { color: '#666666', font: { size: 10 }, boxWidth: 10 } } }, cutout: '65%' }
   });
 }
 
@@ -1393,20 +1876,20 @@ function openPortPanel(idx) {
     incoming.map(v => {
       const eta = ((1-v.progress)*v.totalDist/v.speed).toFixed(1);
       return `<div class="pp-ship-item" onclick="openShipPanel(${v.id})">
-        <span><span class="pp-ship-dot" style="background:${v.color}"></span>${v.name}</span>
-        <span style="color:#94a3b8">${v.cargo.type} | ETA ${eta}h</span>
+        <span><span class="pp-ship-dot" style="background:#cc0000"></span>${v.name}</span>
+        <span style="color:#444444">${v.cargo.type} // ETA ${eta}H</span>
       </div>`;
-    }).join('') : '<div style="color:#64748b;font-size:11px;padding:4px">No incoming vessels</div>';
+    }).join('') : '<div style="color:#444444;font-size:11px;padding:4px">No incoming vessels</div>';
 
   // Departing traffic (vessels from this port)
   const departing = vessels.filter(v => v.origin === p.name && v.progress < 0.3).slice(0, 6);
   document.getElementById('ppDeparting').innerHTML = departing.length ?
     departing.map(v =>
       `<div class="pp-ship-item" onclick="openShipPanel(${v.id})">
-        <span><span class="pp-ship-dot" style="background:${v.color}"></span>${v.name}</span>
-        <span style="color:#94a3b8">→ ${v.destination}</span>
+        <span><span class="pp-ship-dot" style="background:#cc0000"></span>${v.name}</span>
+        <span style="color:#444444">> ${v.destination}</span>
       </div>`
-    ).join('') : '<div style="color:#64748b;font-size:11px;padding:4px">No recent departures</div>';
+    ).join('') : '<div style="color:#444444;font-size:11px;padding:4px">No recent departures</div>';
 
   // Cargo processing
   document.getElementById('ppReceived').textContent = p.received;
@@ -1420,7 +1903,7 @@ function openPortPanel(idx) {
     .sort((a,b)=>b[1]-a[1]).map(([name, pct]) =>
       `<div class="pp-commodity-bar">
         <div class="pp-commodity-label">${name}</div>
-        <div class="pp-commodity-fill" style="width:${(pct/maxComm)*100}px;background:#fbbf24"></div>
+        <div class="pp-commodity-fill" style="width:${(pct/maxComm)*100}px;background:#cc0000"></div>
         <div class="pp-commodity-val">${pct}%</div>
       </div>`
     ).join('');
@@ -1436,7 +1919,7 @@ function openPortPanel(idx) {
     .sort((a,b)=>b[1]-a[1]).slice(0,5).map(([name, pct]) =>
       `<div class="pp-commodity-bar">
         <div class="pp-commodity-label">${name}</div>
-        <div class="pp-commodity-fill" style="width:${(pct/maxPartner)*80}px;background:#22d3ee"></div>
+        <div class="pp-commodity-fill" style="width:${(pct/maxPartner)*80}px;background:#cc0000"></div>
         <div class="pp-commodity-val">${pct}%</div>
       </div>`
     ).join('');
@@ -1451,8 +1934,8 @@ function openPortPanel(idx) {
       datasets: [{ data: Object.values(p.commodities), backgroundColor: ['#ef4444','#3b82f6','#22c55e','#a855f7','#f59e0b','#06b6d4','#ec4899'] }]
     },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-      scales: { x: { ticks: { color: '#64748b', font: { size: 8 } }, grid: { display: false } },
-                y: { ticks: { color: '#64748b', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.05)' } } } }
+      scales: { x: { ticks: { color: '#444444', font: { size: 8 } }, grid: { display: false } },
+                y: { ticks: { color: '#444444', font: { size: 9 } }, grid: { color: '#111111' } } } }
   });
 }
 
@@ -1492,7 +1975,7 @@ function initAnalyticsCharts() {
   if (chartDensity) chartDensity.destroy();
   if (chartCorridors) chartCorridors.destroy();
 
-  const portColors = ['#ef4444','#3b82f6','#22c55e','#a855f7','#f59e0b','#06b6d4','#ec4899','#84cc16'];
+  const portColors = ['#cc0000','#ffffff','#666666','#888888','#444444','#cc0000','#999999','#555555'];
 
   // Throughput line chart
   chartThroughput = new Chart(document.getElementById('chartThroughput').getContext('2d'), {
@@ -1501,11 +1984,11 @@ function initAnalyticsCharts() {
       labels: throughputHistory.map((_,i)=>i),
       datasets: ports.slice(0,4).map((p,i) => ({
         label: p.name, data: throughputHistory.map(h => h[p.name]||0),
-        borderColor: portColors[i], borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: false
+        borderColor: portColors[i], borderWidth: 1, pointRadius: 0, tension: 0.3, fill: false
       }))
     },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{color:'#94a3b8',font:{size:9},boxWidth:8}}},
-      scales:{x:{display:false},y:{ticks:{color:'#64748b',font:{size:9}},grid:{color:'rgba(255,255,255,0.05)'}}} }
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{color:'#444444',font:{size:8,family:'Helvetica'},boxWidth:6}}},
+      scales:{x:{display:false},y:{ticks:{color:'#444444',font:{size:9}},grid:{color:'#111111'}}} }
   });
 
   // Cargo distribution pie
@@ -1514,15 +1997,15 @@ function initAnalyticsCharts() {
   chartCargo = new Chart(document.getElementById('chartCargo').getContext('2d'), {
     type: 'doughnut',
     data: { labels: Object.keys(cargoTypes), datasets: [{ data: Object.values(cargoTypes), backgroundColor: portColors }] },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{color:'#94a3b8',font:{size:9},boxWidth:8}}}, cutout:'55%' }
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{color:'#444444',font:{size:8,family:'Helvetica'},boxWidth:6}}}, cutout:'55%' }
   });
 
   // Density timeline
   chartDensity = new Chart(document.getElementById('chartDensity').getContext('2d'), {
     type: 'line',
-    data: { labels: densityHistory.map((_,i)=>i), datasets: [{ data: densityHistory, borderColor: '#22d3ee', borderWidth: 1.5, fill: true, backgroundColor: 'rgba(34,211,238,0.1)', pointRadius: 0, tension: 0.3 }] },
+    data: { labels: densityHistory.map((_,i)=>i), datasets: [{ data: densityHistory, borderColor: '#cc0000', borderWidth: 1, fill: false, pointRadius: 0, tension: 0.3 }] },
     options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
-      scales:{x:{display:false},y:{ticks:{color:'#64748b',font:{size:9}},grid:{color:'rgba(255,255,255,0.05)'}}} }
+      scales:{x:{display:false},y:{ticks:{color:'#444444',font:{size:9}},grid:{color:'#111111'}}} }
   });
 
   // Trade corridors bar
@@ -1536,8 +2019,8 @@ function initAnalyticsCharts() {
     type: 'bar',
     data: { labels: topC.map(c=>c[0]), datasets: [{ data: topC.map(c=>c[1]), backgroundColor: portColors }] },
     options: { responsive:true, maintainAspectRatio:false, indexAxis:'y', plugins:{legend:{display:false}},
-      scales:{x:{ticks:{color:'#64748b',font:{size:8}},grid:{color:'rgba(255,255,255,0.05)'}},
-              y:{ticks:{color:'#94a3b8',font:{size:8}},grid:{display:false}}} }
+      scales:{x:{ticks:{color:'#444444',font:{size:8}},grid:{color:'#111111'}},
+              y:{ticks:{color:'#444444',font:{size:8,family:'Helvetica'}},grid:{display:false}}} }
   });
 }
 
@@ -1960,7 +2443,7 @@ function onShipDragStart(e) {
     remainingRoute.push([pt.lat, pt.lng]);
   }
   dragOldRouteLine = L.polyline(remainingRoute, {
-    color: '#64748b', weight: 2.5, opacity: 0.6, dashArray: '6,4'
+    color: '#444444', weight: 2.5, opacity: 0.6, dashArray: '6,4'
   }).addTo(map);
 
   document.getElementById('dragOverlay').classList.add('show');
@@ -1981,7 +2464,7 @@ function onShipDrag(e) {
   // Draw preview line
   if (dragPreviewLine) map.removeLayer(dragPreviewLine);
   dragPreviewLine = L.polyline(newRoute.map(p => [p[0], p[1]]), {
-    color: '#4ade80', weight: 3, opacity: 0.8, dashArray: '4,4',
+    color: '#cc0000', weight: 1, opacity: 0.8, dashArray: '4,4',
     className: 'drag-route-preview'
   }).addTo(map);
 
@@ -2094,7 +2577,7 @@ function updateDBPanel() {
   document.getElementById('dbTotalRev').textContent = fmtUSD(dbTotalRevenue);
   const profitEl = document.getElementById('dbTotalProfit');
   profitEl.textContent = (dbTotalProfit >= 0 ? '+' : '') + fmtUSD(dbTotalProfit);
-  profitEl.style.color = dbTotalProfit >= 0 ? '#4ade80' : '#f87171';
+  profitEl.style.color = dbTotalProfit >= 0 ? '#ffffff' : '#cc0000';
 
   document.getElementById('dbDeliveries').textContent = dbDeliveryCount;
   document.getElementById('dbTotalDist').textContent = fmtNum(dbTotalDistAll);
@@ -2118,12 +2601,12 @@ function updateDBPanel() {
   shipStats.sort((a, b) => b.profit - a.profit);
   document.getElementById('dbTopShips').innerHTML = shipStats.slice(0, 5).map(s =>
     `<div class="db-ship-row" onclick="openShipPanel(${s.id})">
-      <span class="db-ship-dot" style="background:${s.color}"></span>
+      <span class="db-ship-dot" style="background:#cc0000"></span>
       <span style="flex:1">${s.name}</span>
-      <span style="color:${s.profit >= 0 ? '#4ade80' : '#f87171'};font-weight:600">${fmtUSD(s.profit)}</span>
-      <span style="color:#64748b;margin-left:4px">(${s.deliveries})</span>
+      <span style="color:${s.profit >= 0 ? '#ffffff' : '#cc0000'};font-weight:400">${fmtUSD(s.profit)}</span>
+      <span style="color:#444444;margin-left:4px">(${s.deliveries})</span>
     </div>`
-  ).join('') || '<div style="color:#64748b;font-size:10px">No deliveries yet</div>';
+  ).join('') || '<div style="color:#444444;font-size:10px">No deliveries yet</div>';
 
   // Route efficiency ranking
   const routePerf = {};
@@ -2140,10 +2623,10 @@ function updateDBPanel() {
   document.getElementById('dbRouteRank').innerHTML = routeRanked.map(r =>
     `<div class="pp-commodity-bar" style="margin-bottom:3px">
       <div class="pp-commodity-label" style="min-width:90px;font-size:9px">${r.route}</div>
-      <div class="pp-commodity-fill" style="width:${(r.efficiency/maxEff)*60}px;background:${r.efficiency >= 1 ? '#4ade80' : '#f87171'}"></div>
+      <div class="pp-commodity-fill" style="width:${(r.efficiency/maxEff)*60}px;background:#cc0000"></div>
       <div class="pp-commodity-val" style="font-size:9px">${r.efficiency.toFixed(2)}x</div>
     </div>`
-  ).join('') || '<div style="color:#64748b;font-size:10px">Calculating...</div>';
+  ).join('') || '<div style="color:#444444;font-size:10px">Calculating...</div>';
 
   // Profit chart
   if (dbProfitHistory.length > 1) {
@@ -2153,8 +2636,8 @@ function updateDBPanel() {
       data: {
         labels: dbProfitHistory.map((_, i) => i),
         datasets: [{
-          data: dbProfitHistory, borderColor: '#4ade80', borderWidth: 1.5,
-          fill: true, backgroundColor: 'rgba(74,222,128,0.08)',
+          data: dbProfitHistory, borderColor: '#cc0000', borderWidth: 1,
+          fill: false,
           pointRadius: 0, tension: 0.3
         }]
       },
@@ -2163,7 +2646,7 @@ function updateDBPanel() {
         plugins: { legend: { display: false } },
         scales: {
           x: { display: false },
-          y: { ticks: { color: '#64748b', font: { size: 8 }, callback: v => fmtUSD(v) }, grid: { color: 'rgba(255,255,255,0.04)' } }
+          y: { ticks: { color: '#444444', font: { size: 8 }, callback: v => fmtUSD(v) }, grid: { color: '#111111' } }
         }
       }
     });
@@ -2173,10 +2656,10 @@ function updateDBPanel() {
   document.getElementById('dbEvents').innerHTML = dbEvents.slice(0, 10).map(e => {
     const hrs = Math.floor(e.time / 3600);
     const mins = Math.floor((e.time % 3600) / 60);
-    return `<div style="padding:2px 0;font-size:10px;border-bottom:1px solid rgba(255,255,255,0.03)">
-      <span style="color:#64748b">[${String(hrs).padStart(2,'0')}:${String(mins).padStart(2,'0')}]</span> ${e.text}
+    return `<div style="padding:2px 0;font-size:10px;border-bottom:1px solid #111111">
+      <span style="color:#444444">[${String(hrs).padStart(2,'0')}:${String(mins).padStart(2,'0')}]</span> ${e.text}
     </div>`;
-  }).join('') || '<div style="color:#64748b;font-size:10px">No events yet</div>';
+  }).join('') || '<div style="color:#444444;font-size:10px">No events yet</div>';
 }
 
 function exportDBData() {
@@ -2234,6 +2717,7 @@ document.addEventListener('keydown', e => {
   if (e.code === 'KeyT') toggleTrails();
   if (e.code === 'KeyR') toggleRoutes();
   if (e.code === 'KeyH') toggleHeatmap();
+  if (e.code === 'KeyF') toggleGFW();
   if (e.code === 'KeyA') toggleAnalytics();
   if (e.code === 'KeyD') toggleDragMode();
   if (e.code === 'KeyB') toggleDBPanel();
@@ -2360,7 +2844,7 @@ function grabVessel(v, latlng) {
         remainingRoute.push([pt.lat, pt.lng]);
     }
     dragOldRouteLine = L.polyline(remainingRoute, {
-        color: '#64748b', weight: 2.5, opacity: 0.6, dashArray: '6,4'
+        color: '#444444', weight: 2.5, opacity: 0.6, dashArray: '6,4'
     }).addTo(map);
 
     document.getElementById('dragOverlay').classList.add('show');
@@ -2421,16 +2905,16 @@ function drawHandSkeleton(lm, pinching, pinchDist) {
     dctx.setLineDash([]);
 
     // Text overlay: pinch status
-    dctx.font = 'bold 14px monospace';
+    dctx.font = 'bold 14px Helvetica, Arial, sans-serif';
     dctx.fillStyle = pinching ? '#4ade80' : '#f87171';
     dctx.fillText(`PINCH: ${pinching ? 'YES' : 'NO'}`, 10, 20);
     dctx.fillStyle = '#e2e8f0';
-    dctx.font = '12px monospace';
+    dctx.font = '12px Helvetica, Arial, sans-serif';
     dctx.fillText(`Dist: ${pinchDist.toFixed(3)} (thr: ${PINCH_THRESHOLD})`, 10, 38);
 
     if (draggingVessel) {
         dctx.fillStyle = '#f59e0b';
-        dctx.font = 'bold 13px monospace';
+        dctx.font = 'bold 13px Helvetica, Arial, sans-serif';
         dctx.fillText(`DRAGGING: ${draggingVessel.name}`, 10, 56);
     }
 }
@@ -2460,7 +2944,7 @@ function updateEasyHandsVisuals(latlng) {
 
     // Show target info on debug canvas
     dctx.fillStyle = '#22d3ee';
-    dctx.font = 'bold 12px monospace';
+    dctx.font = 'bold 12px Helvetica, Arial, sans-serif';
     const distKm = (distance / 1000).toFixed(1);
     dctx.fillText(`TARGET: ${vessel.name} (${distKm}km)`, 10, debugCanvas.height - 14);
 }
@@ -2492,10 +2976,10 @@ function initHandTracking() {
 
     if (!res.multiHandLandmarks || !res.multiHandLandmarks.length) {
         // No hand detected — show warning
-        dctx.font = 'bold 16px monospace';
+        dctx.font = 'bold 16px Helvetica, Arial, sans-serif';
         dctx.fillStyle = '#f87171';
         dctx.fillText('NO HAND DETECTED', 10, 30);
-        dctx.font = '12px monospace';
+        dctx.font = '12px Helvetica, Arial, sans-serif';
         dctx.fillStyle = '#94a3b8';
         dctx.fillText('Show your hand to the camera', 10, 50);
         return;
